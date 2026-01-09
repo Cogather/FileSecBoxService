@@ -26,7 +26,7 @@ COPY --from=build /app/target/file-sec-box-0.0.1-SNAPSHOT.jar app.jar
 RUN mkdir -p /webIde/product/skill
 
 # 暴露端口
-EXPOSE 8080
+EXPOSE 8003
 
 # 以 Root 权限运行 (默认即为 Root)
 ENTRYPOINT ["java", "-jar", "app.jar"]

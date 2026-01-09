@@ -37,7 +37,7 @@ This service provides a secure environment for storing and executing "skills" (s
 
 2. Run the container:
    ```bash
-   docker run -p 8080:8080 --name sandbox-service file-sec-box
+   docker run -p 8003:8003 --name sandbox-service file-sec-box
    ```
 
 ### Manual Build

@@ -14,7 +14,7 @@
     *   `file` (File, 必填): ZIP 格式的技能包。
 *   **请求示例**:
     ```bash
-    curl -X POST -F "file=@my_skill.zip" http://localhost:8080/v1/skills/user123/agent456/upload
+    curl -X POST -F "file=@my_skill.zip" http://localhost:8003/v1/skills/user123/agent456/upload
     ```
 *   **返回体**: `String`
 *   **返回示例**:
@@ -31,7 +31,7 @@
 *   **请求方式**: `GET`
 *   **请求示例**:
     ```bash
-    curl http://localhost:8080/v1/skills/user123/agent456/list
+    curl http://localhost:8003/v1/skills/user123/agent456/list
     ```
 *   **返回体**: `Array<Object>`
 *   **返回示例**:
@@ -57,7 +57,7 @@
 *   **请求方式**: `GET`
 *   **请求示例**:
     ```bash
-    curl http://localhost:8080/v1/skills/user123/agent456/skill001/files
+    curl http://localhost:8003/v1/skills/user123/agent456/skill001/files
     ```
 *   **返回体**: `Array<String>`
 *   **返回示例**:
@@ -83,7 +83,7 @@
     *   `end` (Int, 可选): 结束行号。
 *   **请求示例 (按行读取)**:
     ```bash
-    curl "http://localhost:8080/v1/skills/user123/agent456/skill001/content?path=main.py&start=1&end=10"
+    curl "http://localhost:8003/v1/skills/user123/agent456/skill001/content?path=main.py&start=1&end=10"
     ```
 *   **返回体**: `String` (全量) 或 `Array<String>` (分页)
 *   **返回示例 (分页)**:
@@ -112,7 +112,7 @@
     ```bash
     curl -X PUT -H "Content-Type: text/plain" \
          --data "NEW_LINE_CONTENT" \
-         "http://localhost:8080/v1/skills/user123/agent456/skill001/edit?path=config.json&start=5&end=10"
+         "http://localhost:8003/v1/skills/user123/agent456/skill001/edit?path=config.json&start=5&end=10"
     ```
 *   **返回体**: `String`
 *   **返回示例**: `File updated.`
@@ -133,7 +133,7 @@
     ```bash
     curl -X POST -H "Content-Type: application/json" \
          -d '["-c", "echo \"print(\"hello\")\" > dynamic_script.py"]' \
-         "http://localhost:8080/v1/skills/user123/agent456/skill001/execute?command=bash"
+         "http://localhost:8003/v1/skills/user123/agent456/skill001/execute?command=bash"
     ```
 *   **返回体**: `String` (标准输出与标准错误的合并结果)
 *   **返回示例**:
