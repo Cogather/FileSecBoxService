@@ -7,6 +7,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -48,7 +49,7 @@ public class FileService {
     }
 
     /**
-     * 上传并安全解压
+     * 上传并安全解压 (优先 UTF-8，备选 GBK，解决 Linux 容器下 Windows ZIP 的 MALFORMED 错误)
      */
     public void storeSkillZip(String userId, String agentId, MultipartFile file) throws IOException {
         Path agentDir = rootLocation.resolve(userId).resolve(agentId);
@@ -62,23 +63,35 @@ public class FileService {
             }
             Files.createDirectories(agentDir);
 
-            try (ZipInputStream zis = new ZipInputStream(file.getInputStream())) {
-                ZipEntry entry;
-                while ((entry = zis.getNextEntry()) != null) {
-                    Path entryPath = agentDir.resolve(entry.getName()).normalize();
-                    validateScope(entryPath, agentDir);
-
-                    if (entry.isDirectory()) {
-                        Files.createDirectories(entryPath);
-                    } else {
-                        Files.createDirectories(entryPath.getParent());
-                        Files.copy(zis, entryPath, StandardCopyOption.REPLACE_EXISTING);
-                    }
-                    zis.closeEntry();
+            // 1. 优先尝试标准 UTF-8 编码
+            try (ZipInputStream zis = new ZipInputStream(file.getInputStream(), StandardCharsets.UTF_8)) {
+                extractZip(zis, agentDir);
+            } catch (Exception e) {
+                // 2. 如果 UTF-8 报 MALFORMED 错误，说明 ZIP 可能是 Windows 环境下的 GBK 编码
+                try (ZipInputStream zisGbk = new ZipInputStream(file.getInputStream(), Charset.forName("GBK"))) {
+                    extractZip(zisGbk, agentDir);
+                } catch (Exception e2) {
+                    throw new IOException("Failed to extract ZIP. Ensure it is not password protected and uses UTF-8 or GBK encoding. Error: " + e2.getMessage());
                 }
             }
         } finally {
             lock.writeLock().unlock();
+        }
+    }
+
+    private void extractZip(ZipInputStream zis, Path targetDir) throws IOException {
+        ZipEntry entry;
+        while ((entry = zis.getNextEntry()) != null) {
+            Path entryPath = targetDir.resolve(entry.getName()).normalize();
+            validateScope(entryPath, targetDir);
+
+            if (entry.isDirectory()) {
+                Files.createDirectories(entryPath);
+            } else {
+                Files.createDirectories(entryPath.getParent());
+                Files.copy(zis, entryPath, StandardCopyOption.REPLACE_EXISTING);
+            }
+            zis.closeEntry();
         }
     }
 
