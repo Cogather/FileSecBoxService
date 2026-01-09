@@ -1,6 +1,8 @@
 package com.example.filesecbox.service;
 
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.FileSystemUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -34,6 +36,15 @@ public class FileService {
         private String path;
     }
 
+    @Data
+    @AllArgsConstructor
+    @NoArgsConstructor
+    public static class UploadResponse {
+        private String skillName;
+        private String uploadPath;
+        private String status;
+    }
+
     public FileService() throws IOException {
         Files.createDirectories(this.rootLocation);
     }
@@ -49,33 +60,70 @@ public class FileService {
     }
 
     /**
-     * 上传并安全解压 (优先 UTF-8，备选 GBK，解决 Linux 容器下 Windows ZIP 的 MALFORMED 错误)
+     * 上传并安全解压 (只覆盖同名技能)
      */
-    public void storeSkillZip(String userId, String agentId, MultipartFile file) throws IOException {
+    public List<UploadResponse> storeSkillZip(String userId, String agentId, MultipartFile file) throws IOException {
         Path agentDir = rootLocation.resolve(userId).resolve(agentId);
         String lockKey = userId + "/" + agentId;
         ReadWriteLock lock = getLock(lockKey);
 
         lock.writeLock().lock();
         try {
-            if (Files.exists(agentDir)) {
-                FileSystemUtils.deleteRecursively(agentDir);
-            }
             Files.createDirectories(agentDir);
 
-            // 1. 优先尝试标准 UTF-8 编码
+            // 存储本次上传涉及的所有技能目录名
+            Set<String> affectedSkills = new HashSet<>();
+            
+            // 第一次扫描 ZIP 获取所有顶级目录名
+            try (ZipInputStream zis = new ZipInputStream(file.getInputStream(), StandardCharsets.UTF_8)) {
+                scanAffectedSkills(zis, affectedSkills);
+            } catch (Exception e) {
+                try (ZipInputStream zisGbk = new ZipInputStream(file.getInputStream(), Charset.forName("GBK"))) {
+                    scanAffectedSkills(zisGbk, affectedSkills);
+                }
+            }
+
+            // 清理已存在的同名技能目录（实现按技能名覆盖，而不是按 agentId 覆盖）
+            for (String skillName : affectedSkills) {
+                Path skillPath = agentDir.resolve(skillName);
+                if (Files.exists(skillPath)) {
+                    FileSystemUtils.deleteRecursively(skillPath);
+                }
+            }
+
+            // 执行实际解压
             try (ZipInputStream zis = new ZipInputStream(file.getInputStream(), StandardCharsets.UTF_8)) {
                 extractZip(zis, agentDir);
             } catch (Exception e) {
-                // 2. 如果 UTF-8 报 MALFORMED 错误，说明 ZIP 可能是 Windows 环境下的 GBK 编码
                 try (ZipInputStream zisGbk = new ZipInputStream(file.getInputStream(), Charset.forName("GBK"))) {
                     extractZip(zisGbk, agentDir);
                 } catch (Exception e2) {
-                    throw new IOException("Failed to extract ZIP. Ensure it is not password protected and uses UTF-8 or GBK encoding. Error: " + e2.getMessage());
+                    throw new IOException("Failed to extract ZIP: " + e2.getMessage());
                 }
             }
+
+            // 构造详细响应
+            return affectedSkills.stream().map(name -> {
+                Path p = agentDir.resolve(name);
+                return new UploadResponse(name, p.toString(), "Success");
+            }).collect(Collectors.toList());
+
         } finally {
             lock.writeLock().unlock();
+        }
+    }
+
+    private void scanAffectedSkills(ZipInputStream zis, Set<String> affectedSkills) throws IOException {
+        ZipEntry entry;
+        while ((entry = zis.getNextEntry()) != null) {
+            String name = entry.getName();
+            int firstSlash = name.indexOf('/');
+            if (firstSlash != -1) {
+                affectedSkills.add(name.substring(0, firstSlash));
+            } else if (entry.isDirectory()) {
+                affectedSkills.add(name);
+            }
+            zis.closeEntry();
         }
     }
 

@@ -5,7 +5,7 @@
 ## 1. 技能管理 (Skill Management)
 
 ### 1.1 上传并解压技能包
-上传一个 ZIP 压缩包，系统会自动创建用户与 Agent 的关联目录，并安全地解压覆盖旧数据。
+上传一个 ZIP 压缩包，系统会自动解析 ZIP 内的技能名，**仅覆盖同名技能目录**，并返回详细的上传报告。
 
 *   **URL**: `POST /v1/skills/{userId}/{agentId}/upload`
 *   **请求方式**: `POST`
@@ -16,10 +16,16 @@
     ```bash
     curl -X POST -F "file=@my_skill.zip" http://localhost:8003/v1/skills/user123/agent456/upload
     ```
-*   **返回体**: `String`
+*   **返回体**: `Array<Object>`
 *   **返回示例**:
-    ```text
-    Skill uploaded and extracted.
+    ```json
+    [
+      {
+        "skillName": "my-python-skill",
+        "uploadPath": "/webIde/product/skill/user123/agent456/my-python-skill",
+        "status": "Success"
+      }
+    ]
     ```
 
 ---

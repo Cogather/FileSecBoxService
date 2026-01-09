@@ -20,14 +20,20 @@ public class FileController {
     @Autowired
     private SkillExecutor skillExecutor;
 
-    // 1. 上传技能包
+    /**
+     * 上传技能包
+     * 支持多技能 ZIP，仅覆盖同名技能目录，返回详细上传清单
+     */
     @PostMapping("/{userId}/{agentId}/upload")
-    public ResponseEntity<String> uploadSkill(@PathVariable String userId, @PathVariable String agentId, @RequestParam("file") MultipartFile file) {
+    public ResponseEntity<List<FileService.UploadResponse>> uploadSkill(
+            @PathVariable String userId, 
+            @PathVariable String agentId, 
+            @RequestParam("file") MultipartFile file) {
         try {
-            fileService.storeSkillZip(userId, agentId, file);
-            return ResponseEntity.ok("Skill uploaded and extracted.");
+            List<FileService.UploadResponse> responses = fileService.storeSkillZip(userId, agentId, file);
+            return ResponseEntity.ok(responses);
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(e.getMessage());
+            return ResponseEntity.status(500).body(null);
         }
     }
 
