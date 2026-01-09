@@ -16,6 +16,11 @@ FileSecBoxService 是一个基于 Java 8 开发的安全沙箱服务，专门用
     *   实现增量更新与局部覆盖，防止误删同一 Agent 下的其他技能。
 *   **Zip Slip 防御**: 解压过程中，每个条目路径必须通过 `normalize()` 规范化，且必须通过 `startsWith(agentDir)` 校验。任何包含 `../` 的尝试都将直接导致解压失败并抛出安全异常。
 
+### 2.3 技能元数据自动解析
+系统通过扫描目录下的 `SKILL.md` 文件来提取信息：
+*   **解析规则**: 提取文件开头部分的 `name: xxx` 和 `description: xxx` 标记。
+*   **返回格式**: 对象数组，每个对象仅包含 `{name, description}`。
+
 ## 3. 安全隔离与执行限制 (Root 权限加固方案)
 
 ### 3.1 核心命令白名单 (Strict Binary Whitelist)

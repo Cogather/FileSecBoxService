@@ -32,8 +32,6 @@ public class FileService {
     public static class SkillMetadata {
         private String name;
         private String description;
-        private String skillId;
-        private String path;
     }
 
     @Data
@@ -160,8 +158,6 @@ public class FileService {
                     if (Files.isDirectory(skillPath)) {
                         SkillMetadata meta = parseSkillMd(skillPath);
                         if (meta != null) {
-                            meta.setSkillId(skillPath.getFileName().toString());
-                            meta.setPath(skillPath.toString());
                             metadataList.add(meta);
                         }
                     }

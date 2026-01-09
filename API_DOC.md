@@ -45,9 +45,7 @@
     [
       {
         "name": "文本摘要工具",
-        "description": "基于 Python 的自动提取文章摘要技能",
-        "skillId": "text-summary-v1",
-        "path": "/webIde/product/skill/user123/agent456/text-summary-v1"
+        "description": "基于 Python 的自动提取文章摘要技能"
       }
     ]
     ```
