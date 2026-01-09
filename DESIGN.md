@@ -38,10 +38,10 @@ FileSecBoxService 是一个基于 Java 8 开发的安全沙箱服务，专门用
 
 ### 3.4 上下文锁定与跨用户隔离 (Multi-tenant Isolation)
 *   **工作目录锁定**: 每次执行命令前，系统强制调用 `ProcessBuilder.directory(skillRoot)`。这意味着所有相对路径操作（如 `mkdir tmp`）都会自动作用在技能目录下。
-*   **绝对路径强制锚定**: 
-    *   系统会对所有命令参数进行扫描。
-    *   若参数是以 `/` 开头的绝对路径，系统会校验其是否以 `/{userId}/{agentId}/{skillId}/` 为前缀。
-    *   **结果**: 即使是 Root 权限，`user_a` 的脚本也无法通过 `ls /webIde/product/skill/user_b` 来窥探或修改 `user_b` 的数据。
+*   **绝对路径组件锚定 (Strict Path Anchoring)**: 
+    *   系统会对所有命令参数进行深度扫描。
+    *   若参数是以 `/` 开头的绝对路径，系统会将其 `normalize()` 后，校验其物理组件是否以 `/{userId}/{agentId}/{skillId}/` 为前缀（基于目录组件匹配，而非简单字符串前缀）。
+    *   **结果**: 即使是 Root 权限，`user_a` 的脚本也无法通过任何绝对路径手段（如 `ls /webIde/product/skill/user_b`）窥探或修改 `user_b` 的数据。
 *   **超时硬限制**: 任何脚本的执行时间不得超过 **5 分钟** (300 秒)，超时将触发强制 `destroyForcibly()`。
 
 ## 4. 接口设计 (API v1)
