@@ -44,10 +44,9 @@ public class SkillExecutor {
                 throw new RuntimeException("Security Error: Forbidden access to system paths in arguments.");
             }
 
-            // 跨用户/跨技能隔离：如果参数中包含绝对路径，必须确保它位于当前技能目录下
-            // 重点检查：禁止 user_a 访问 /webIde/product/skill/user_b 的目录
-            if (lowerArg.contains("/webide/product/skill")) {
-                validateSkillInternalPath(arg, workingDir);
+            // 严格绝对路径锚定：若参数以 / 开头，强制要求其物理路径位于当前技能目录下
+            if (arg.startsWith("/")) {
+                validateAbsoluteSkillPath(arg, workingDir);
             }
         }
 
@@ -58,7 +57,6 @@ public class SkillExecutor {
         cmdList.addAll(Arrays.asList(args));
         pb.command(cmdList);
         
-        // 核心：默认按进入到技能名称目录下执行
         pb.directory(workingDir.toFile());
         pb.redirectErrorStream(true);
         
@@ -84,7 +82,6 @@ public class SkillExecutor {
     }
 
     private boolean isSystemSensitivePath(String arg) {
-        // 常见的敏感系统路径列表
         String[] sensitivePaths = {"/etc/", "/root/", "/proc/", "/dev/", "/sys/", "/boot/", "/var/", "/home/", "/bin/", "/usr/bin/", "/usr/sbin/"};
         for (String path : sensitivePaths) {
             if (arg.contains(path)) return true;
@@ -92,24 +89,23 @@ public class SkillExecutor {
         return false;
     }
 
-    private void validateSkillInternalPath(String arg, Path allowedDir) {
-        // 提取参数中可能包含的绝对路径进行校验
-        // 这里采用保守策略：如果参数字符串包含根路径，则整个参数解析后的路径必须以 allowedDir 开头
+    /**
+     * 校验绝对路径是否锚定在当前技能目录内 (非模糊匹配)
+     */
+    private void validateAbsoluteSkillPath(String arg, Path workingDir) {
         try {
-            // 简单的路径提取逻辑：寻找以 /webIde/product/skill 开头的子串
-            int index = arg.toLowerCase().indexOf("/webide/product/skill");
-            if (index != -1) {
-                // 截取从该点开始直到空格或结束的部分作为待校验路径
-                String possiblePath = arg.substring(index).split(" ")[0];
-                Path targetPath = Paths.get(possiblePath).normalize();
-                if (!targetPath.startsWith(allowedDir.normalize())) {
-                    throw new RuntimeException("Security Error: Accessing other user's skill directory is forbidden.");
-                }
+            // 获取第一个空格前的路径部分（防止参数拼接）
+            String pathPart = arg.split(" ")[0];
+            Path targetPath = Paths.get(pathPart).normalize();
+            Path baseDir = workingDir.normalize();
+            
+            // 使用 Path.startsWith 进行目录级组件匹配
+            if (!targetPath.startsWith(baseDir)) {
+                throw new RuntimeException("Security Error: Absolute path '" + arg + "' is outside the allowed skill directory.");
             }
         } catch (Exception e) {
             if (e instanceof RuntimeException) throw e;
-            // 路径解析异常也视为风险
-            throw new RuntimeException("Security Error: Malformed path in arguments.");
+            throw new RuntimeException("Security Error: Invalid path format in arguments.");
         }
     }
 }
