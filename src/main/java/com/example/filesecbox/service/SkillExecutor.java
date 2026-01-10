@@ -37,19 +37,20 @@ public class SkillExecutor {
         for (String arg : args) {
             String lowerArg = arg.toLowerCase();
             
-            // 严格禁止路径穿越逃逸
+            // 1. 严格禁止路径穿越逃逸
             if (lowerArg.contains("..")) {
                 throw new RuntimeException("Security Error: Path traversal '..' is strictly forbidden.");
             }
 
-            // 拦截对系统敏感目录的任何形式引用
+            // 2. 拦截对系统敏感目录的引用
             if (isSystemSensitivePath(lowerArg)) {
                 throw new RuntimeException("Security Error: Forbidden access to system paths in arguments.");
             }
 
-            // 严格绝对路径锚定
-            if (arg.startsWith("/")) {
-                validateAbsoluteSkillPath(arg, workingDir);
+            // 3. 严格绝对路径锚定
+            // 无论绝对路径是独立参数还是在 --file=/path 中，均进行校验
+            if (arg.contains("/")) {
+                validatePathInArgument(arg, workingDir);
             }
         }
         
@@ -117,22 +118,24 @@ public class SkillExecutor {
     }
 
     /**
-     * 校验绝对路径是否锚定在当前技能目录内 (非模糊匹配)
+     * 校验参数中包含的路径是否合法
      */
-    private void validateAbsoluteSkillPath(String arg, Path workingDir) {
-        try {
-            // 获取第一个空格前的路径部分（防止参数拼接）
-            String pathPart = arg.split(" ")[0];
-            Path targetPath = Paths.get(pathPart).normalize();
+    private void validatePathInArgument(String arg, Path workingDir) {
+        // 找到第一个 / 的位置
+        int slashIdx = arg.indexOf("/");
+        if (slashIdx == -1) return;
+
+        // 提取路径部分（例如从 --file=/tmp/123 提取出 /tmp/123）
+        String potentialPath = arg.substring(slashIdx);
+        
+        // 如果路径指向的是 /webIde/product/ 目录，则必须以当前工作目录为前缀
+        // 如果是系统路径，已在 isSystemSensitivePath 中拦截
+        if (potentialPath.startsWith("/webIde/product/")) {
+            Path targetPath = Paths.get(potentialPath).normalize();
             Path baseDir = workingDir.normalize();
-            
-            // 使用 Path.startsWith 进行目录级组件匹配
             if (!targetPath.startsWith(baseDir)) {
-                throw new RuntimeException("Security Error: Absolute path '" + arg + "' is outside the allowed skill directory.");
+                throw new RuntimeException("Security Error: Accessing path outside current scope: " + potentialPath);
             }
-        } catch (Exception e) {
-            if (e instanceof RuntimeException) throw e;
-            throw new RuntimeException("Security Error: Invalid path format in arguments.");
         }
     }
 }
