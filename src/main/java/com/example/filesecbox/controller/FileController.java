@@ -33,14 +33,11 @@ public class FileController {
             @RequestParam("file") MultipartFile file) {
         try {
             List<FileService.UploadResponse> responses = fileService.storeSkillZip(userId, agentId, file);
-            String skillNames = responses.stream()
-                    .map(FileService.UploadResponse::getSkillName)
+            String details = responses.stream()
+                    .map(r -> String.format("skill '%s' to '%s'", r.getSkillName(), r.getUploadPath()))
                     .collect(Collectors.joining(", "));
             
-            String message = String.format("Successfully uploaded and extracted %d skill(s): [%s]. Target directory: /webIde/product/skill/%s/%s", 
-                    responses.size(), skillNames, userId, agentId);
-            
-            return ResponseEntity.ok(ApiResponse.success(message));
+            return ResponseEntity.ok(ApiResponse.success("Upload successful: " + details));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(ApiResponse.error("Upload failed: " + e.getMessage()));
         }
