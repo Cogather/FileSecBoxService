@@ -1,5 +1,6 @@
 package com.example.filesecbox.controller;
 
+import com.example.filesecbox.model.ApiResponse;
 import com.example.filesecbox.service.FileService;
 import com.example.filesecbox.service.SkillExecutor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,7 +24,7 @@ public class FileController {
 
     /**
      * 上传技能包
-     * 返回成功上传的技能名称字符串 (以逗号分隔)
+     * 返回详细的上传成功提示
      */
     @PostMapping("/{userId}/{agentId}/upload")
     public ResponseEntity<ApiResponse<String>> uploadSkill(
@@ -35,15 +36,17 @@ public class FileController {
             String skillNames = responses.stream()
                     .map(FileService.UploadResponse::getSkillName)
                     .collect(Collectors.joining(", "));
-            return ResponseEntity.ok(ApiResponse.success(skillNames));
+            
+            String message = String.format("Successfully uploaded and extracted %d skill(s): [%s]. Target directory: /webIde/product/skill/%s/%s", 
+                    responses.size(), skillNames, userId, agentId);
+            
+            return ResponseEntity.ok(ApiResponse.success(message));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+            return ResponseEntity.status(500).body(ApiResponse.error("Upload failed: " + e.getMessage()));
         }
     }
 
-    /**
-     * 查看技能列表
-     */
+    // 2. 查看技能列表 (元数据解析)
     @GetMapping("/{userId}/{agentId}/list")
     public ResponseEntity<ApiResponse<List<FileService.SkillMetadata>>> getSkillList(@PathVariable String userId, @PathVariable String agentId) {
         try {
@@ -53,9 +56,7 @@ public class FileController {
         }
     }
 
-    /**
-     * 查看具体技能的文件列表
-     */
+    // 3. 查看具体技能的文件列表
     @GetMapping("/{userId}/{agentId}/{skillId}/files")
     public ResponseEntity<ApiResponse<List<String>>> listFiles(@PathVariable String userId, @PathVariable String agentId, @PathVariable String skillId) {
         try {
@@ -65,9 +66,7 @@ public class FileController {
         }
     }
 
-    /**
-     * 查看文件内容
-     */
+    // 4. 查看文件内容 (支持全量或按行读取)
     @GetMapping("/{userId}/{agentId}/{skillId}/content")
     public ResponseEntity<ApiResponse<Object>> getFileContent(
             @PathVariable String userId, @PathVariable String agentId, @PathVariable String skillId,
@@ -75,16 +74,13 @@ public class FileController {
             @RequestParam(required = false) Integer start,
             @RequestParam(required = false) Integer end) {
         try {
-            Object content = fileService.readFile(userId, agentId, skillId, path, start, end);
-            return ResponseEntity.ok(ApiResponse.success(content));
+            return ResponseEntity.ok(ApiResponse.success(fileService.readFile(userId, agentId, skillId, path, start, end)));
         } catch (Exception e) {
             return ResponseEntity.status(404).body(ApiResponse.error(e.getMessage()));
         }
     }
 
-    /**
-     * 编辑/创建文件
-     */
+    // 5. 编辑/创建文件 (支持指定行范围)
     @PutMapping("/{userId}/{agentId}/{skillId}/edit")
     public ResponseEntity<ApiResponse<String>> editFile(
             @PathVariable String userId, @PathVariable String agentId, @PathVariable String skillId,
@@ -94,15 +90,13 @@ public class FileController {
             @RequestBody String content) {
         try {
             fileService.writeFile(userId, agentId, skillId, path, content, start, end);
-            return ResponseEntity.ok(ApiResponse.success("File updated."));
+            return ResponseEntity.ok(ApiResponse.success("File updated successfully."));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
         }
     }
 
-    /**
-     * 技能上下文内执行命令
-     */
+    // 6. 技能上下文内执行命令
     @PostMapping("/{userId}/{agentId}/{skillId}/execute")
     public ResponseEntity<ApiResponse<String>> execute(
             @PathVariable String userId, @PathVariable String agentId, @PathVariable String skillId,

@@ -51,6 +51,11 @@ FileSecBoxService 是一个基于 Java 8 开发的安全沙箱服务，专门用
 
 ## 4. 接口设计 (API v1)
 
+### 4.0 统一响应结构
+所有接口均遵循以下 JSON 包装格式：
+*   `status`: 状态码（`success` 或 `error`）。
+*   `data`: 具体的业务数据或错误消息字符串。
+
 ### 4.1 核心接口列表
 1.  `POST /v1/skills/{userId}/{agentId}/upload`: 安全上传并覆盖。
 2.  `GET /v1/skills/{userId}/{agentId}/list`: 递归解析 `SKILL.md` 返回元数据。
