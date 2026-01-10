@@ -1,65 +1,119 @@
 # FileSecBoxService 设计文档
 
-## 1. 项目概述
-FileSecBoxService 是一个基于 Java 8 开发的安全沙箱服务，专门用于管理和执行通过 WebIDE 上传的“技能（Skills）”。由于该服务在容器内以 **Root 权限** 运行，系统通过严苛的应用层“白名单控制”与“路径锚定”技术，构建了一个逻辑上的受限沙箱环境。
+## 1. 整体架构
+FileSecBoxService 是一个面向应用开发平台的安全沙箱执行引擎。它采用“分层存储”与“写时复制”技术，实现在 Root 权限容器内逻辑隔离应用公共技能、用户泛化技能以及通用的沙箱临时工作区。
 
-## 2. 存储与组织结构
+---
 
-### 2.1 目录规范
-*   **物理根路径**: `/webIde/product/skill` (WebIDE 持久化挂载点)。
-*   **逻辑层级**: `/{userId}/{agentId}/{skillId}/`。
+## 2. 视图模型
 
-### 2.2 存储安全策略
-*   **技能级覆盖 (Skill-level Overwrite)**: 
-    *   上传 ZIP 时，系统会解析 ZIP 内包含的技能目录名。
-    *   **仅删除** ZIP 中出现的同名技能目录，保留该 `agentId` 下的其他技能。
-    *   实现增量更新与局部覆盖，防止误删同一 Agent 下的其他技能。
-*   **Zip Slip 防御**: 解压过程中，每个条目路径必须通过 `normalize()` 规范化，且必须通过 `startsWith(agentDir)` 校验。任何包含 `../` 的尝试都将直接导致解压失败并抛出安全异常。
+### 2.1 场景视图
+描述用户与沙箱服务的核心交互场景。
 
-### 2.3 技能元数据自动解析
-系统通过扫描目录下的 `SKILL.md` 文件来提取信息：
-*   **解析规则**: 提取文件开头部分的 `name: xxx` 和 `description: xxx` 标记。
-*   **返回格式**: 对象数组，每个对象仅包含 `{name, description}`。
+```plantuml
+@startuml
+left to right direction
+actor "用户" as user
+package "沙箱服务" {
+  usecase "技能管理" as UC1
+  usecase "通用沙箱文件编辑" as UC2
+  usecase "安全指令执行" as UC3
+}
+user --> UC1
+user --> UC2
+user --> UC3
+@endum
+```
 
-## 3. 安全隔离与执行限制 (Root 权限加固方案)
+### 2.2 交互视图
+描述平台端、Agent 引擎与沙箱服务的交互协作关系。
 
-### 3.1 核心命令白名单 (Strict Binary Whitelist)
-系统仅允许执行以下 **17 个** 二进制程序。除此之外的任何命令调用（包括但不限于 `rm -rf /`, `chmod 777 /etc` 等）都将被拦截：
-*   **脚本引擎**: `python3`, `bash`, `sh`
-*   **文件操作**: `ls`, `cat`, `mkdir`, `touch`, `cp`, `mv`, `rm`, `tee`
-*   **文本/流处理**: `echo`, `grep`, `sed`, `find`, `chmod`, `xargs`
+```plantuml
+@startuml
+participant "平台端" as P
+participant "Agent 引擎" as SDK
+participant "沙箱服务" as S
+database "文件系统" as FS
 
-### 3.2 参数层级过滤 (Argument Content Inspection)
-即使在白名单内的命令，其参数也将受到实时扫描。若参数中出现以下任何特征，执行请求将立即被阻断：
-*   **逃逸符**: `..` (严禁任何形式的向上回溯)
-*   **系统敏感路径**: `/etc/`, `/root/`, `/proc/`, `/dev/`, `/sys/`, `/boot/`
-*   **危险 Flag**: 禁止命令参数中包含 `--privileged`, `eval`, `exec` 等可能导致提权的关键字。
+== 通用沙箱操作 ==
+P -> SDK: 请求编辑通用文件
+SDK -> S: PUT /v1/sandbox/{userId}/{agentId}/edit?path=...
+S -> FS: 校验并写入 /sandbox/{userId}/{agentId}/ 目录
+S --> SDK: 成功
+SDK --> P: 成功
 
-### 3.3 环境净化策略 (Environment Sanitization)
-为了防止 Root 容器的环境变量（如集群 Secret）泄露，系统采用“安全白名单继承”模式：
-*   **允许保留的变量**: `PATH`, `LANG`, `LC_ALL`, `HOME`, `USER`, `PWD`
-*   **强制剔除的变量**: 所有 K8S 注入变量（`KUBERNETES_...`）、数据库密钥、凭证信息等。
-*   **路径强制重置**: `PATH` 变量被重写为标准的 `/usr/local/bin:/usr/bin:/bin`。
+== 技能执行操作 ==
+P -> SDK: 执行指定技能指令
+SDK -> S: POST /v1/skills/{userId}/{agentId}/{skillId}/execute
+S -> FS: 在 /skill/ 目录下安全执行
+S --> SDK: 结果
+SDK --> P: 结果
+@endum
+```
 
-### 3.4 上下文锁定与跨用户隔离 (Multi-tenant Isolation)
-*   **工作目录锁定**: 每次执行命令前，系统强制调用 `ProcessBuilder.directory(skillRoot)`。这意味着所有相对路径操作（如 `mkdir tmp`）都会自动作用在技能目录下。
-*   **绝对路径组件锚定 (Strict Path Anchoring)**: 
-    *   系统会对所有命令参数进行深度扫描。
-    *   若参数是以 `/` 开头的绝对路径，系统会将其 `normalize()` 后，校验其物理组件是否以 `/{userId}/{agentId}/{skillId}/` 为前缀（基于目录组件匹配，而非简单字符串前缀）。
-    *   **结果**: 即使是 Root 权限，`user_a` 的脚本也无法通过任何绝对路径手段（如 `ls /webIde/product/skill/user_b`）窥探或修改 `user_b` 的数据。
-*   **超时硬限制**: 任何脚本的执行时间不得超过 **5 分钟** (300 秒)，超时将触发强制 `destroyForcibly()`。
+### 2.3 物理视图
+描述磁盘目录的分层布局。
 
-## 4. 接口设计 (API v1)
+```plantuml
+@startuml
+node "Storage Root (/webIde/product)" {
+    folder "skill" {
+        folder "baseline (应用公共技能)"
+        folder "overlay (用户覆盖层)"
+    }
+    folder "sandbox (通用隔离区)" {
+        folder "{userId}" {
+            folder "{agentId}"
+        }
+    }
+}
+@endum
+```
 
-### 4.0 统一响应结构
-所有接口均遵循以下 JSON 包装格式：
-*   `status`: 状态码（`success` 或 `error`）。
-*   `data`: 具体的业务数据或错误消息字符串。
+---
 
-### 4.1 核心接口列表
-1.  `POST /v1/skills/{userId}/{agentId}/upload`: 安全上传并覆盖。
-2.  `GET /v1/skills/{userId}/{agentId}/list`: 递归解析 `SKILL.md` 返回元数据。
-3.  `GET /v1/skills/{userId}/{agentId}/{skillId}/files`: 递归列出文件列表。
-4.  `GET /v1/skills/{userId}/{agentId}/{skillId}/content`: 查看文件内容 (支持行范围读取)。
-5.  `PUT /v1/skills/{userId}/{agentId}/{skillId}/edit`: 覆盖或局部行替换写入。
-6.  `POST /v1/skills/{userId}/{agentId}/{skillId}/execute`: 在指定技能的工作目录下执行命令。
+## 3. 核心设计
+
+### 3.1 通用沙箱模块设计
+*   **定位**: 提供与特定技能无关的、基于用户和应用隔离的临时文件存储与执行环境。
+*   **存储路径**: 强制限制在 `/webIde/product/sandbox/{userId}/{agentId}/`。
+*   **功能**:
+    *   **文件编辑**: 支持任意路径的创建与局部行替换。
+    *   **指令执行**: 工作目录锚定在用户的沙箱根路径，共享 Skill 模块的安全执行逻辑（白名单、环境净化、超时控制）。
+
+### 3.2 Skill 模块设计
+*   **存储与分层策略**: 
+*   **分层合并逻辑**: 
+    1.  **优先级**: 用户覆盖层优先级高于应用公共技能层。
+    2.  **列表合并**: 当查询技能列表或文件列表时，沙箱会合并两个目录的结果。若存在同名技能，优先展示 overlay 中的内容。
+    3.  **读操作**: 读取文件时，系统首选 overlay 路径，若文件不存在则回退至 baseline 路径。
+*   **写时复制**: 
+    *   当用户尝试编辑属于 baseline 的文件时，系统会自动在 overlay 的对应目录下创建该文件的物理副本，后续所有修改均作用于副本。
+*   **并发控制**: 采用 `ReentrantReadWriteLock` 实现文件级的读写锁，确保在分层合并过程中数据的线程安全。
+
+### 3.2 安全执行引擎
+*   **指令白名单**: 严格限制可执行的指令，仅包含以下项：
+    `python3`, `pip`, `pip3`, `bash`, `sh`, `ls`, `cat`, `grep`, `sed`, `awk`, `echo`, `cp`, `mv`, `rm`, `mkdir`, `find`, `curl`
+*   **路径隔离与锚定**:
+    *   **根路径限制**: 指令执行的工作目录强制锚定在当前技能的合并根目录下。
+    *   **参数校验**: 对指令参数进行深度扫描。若参数包含绝对路径（以 `/` 开头），必须以当前技能的物理存储路径为前缀；禁止包含 `..` 等路径跳转符。
+*   **执行加固**:
+    *   **环境净化**: 启动子进程前，强制清理所有以 `KUBERNETES_`, `SERVICE_`, `SECRET_` 开头的环境变量，防止容器环境信息泄露。
+    *   **超时控制**: 所有指令执行强制设定 5 分钟超时时间，防止恶意脚本挂起系统资源。
+    *   **权限限制**: 虽以 Root 运行，但通过指令白名单和路径锚定将影响范围严格限制在单个技能目录内。
+
+### 3.3 平台映射设计
+*   **单表映射**: 云端通过 `agent_skill_registry` 表管理映射关系。
+    *   **字段设计**: `id`, `agent_id`, `skill_id`, `user_id` (可为空), `created_at` 等。
+    *   **逻辑区分**:
+        *   当 `user_id` 为空时，该技能记录属于“应用公共技能”，存储在沙箱的 baseline 目录。
+        *   当 `user_id` 不为空时，该记录属于“用户泛化技能”，存储在沙箱的 overlay 目录。
+
+### 3.4 技能生命周期管理
+*   **上传与提取**:
+    *   **多编码兼容**: 针对上传的 ZIP 包，系统采用“双尝试”机制：首选 UTF-8 解码文件名；若出现 MALFORMED 异常，则自动回退至 GBK 编码重试。
+    *   **覆盖逻辑**: 上传同名技能时，系统会执行“删除并重建”策略。先递归删除目标路径下的旧技能文件，再执行解压，确保技能版本的干净覆盖。
+*   **元数据解析**:
+    *   解压完成后，系统会自动扫描技能根目录下的 `skill.md` 或 `README.md`，提取首行 `#` 标题作为技能的显示名称，若缺失则默认使用目录名。
+*   **目录结构强制规范**:
+    *   所有提取后的技能必须严格存放于 `/{scope}/{userId}/{agentId}/{skillId}/` 结构下。userId 和 agentId 由 Agent 引擎在调用时通过路径参数传入，沙箱不解析内部逻辑，仅做物理隔离。

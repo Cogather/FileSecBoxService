@@ -7,6 +7,7 @@ This service provides a secure environment for storing and executing "skills" (s
 - **Skill Management**: Securely upload ZIP packages, auto-extract, and manage skill metadata (via `SKILL.md`).
 - **File Operations**: Full file lifecycle management including recursive listing, full/partial reading, and editing.
 - **Sandbox Execution**: Execute scripts in a locked context directory with a strict command whitelist and 5-minute timeouts.
+- **Layered Storage (Baseline/Overlay)**: Supports platform-wide "baseline" skills and user-specific "overlay" skills with Copy-on-Write logic.
 - **Root Security Hardening**: Specialized defenses for Root environments, including path anchoring and deep argument inspection.
 
 ## API Endpoints (v1)
