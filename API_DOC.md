@@ -97,7 +97,9 @@
     ```json
     {
       "status": "success",
-      "data": "import sys\nimport os\n\ndef main():\n    print('Hello Sandbox')"
+      "data": {
+        "content": "import sys\nimport os\n\ndef main():\n    print('Hello Sandbox')"
+      }
     }
     ```
 *   **示例请求 2 (分页读取)**:
@@ -108,10 +110,12 @@
     ```json
     {
       "status": "success",
-      "data": [
-        "import sys",
-        "import os"
-      ]
+      "data": {
+        "content": [
+          "import sys",
+          "import os"
+        ]
+      }
     }
     ```
 
@@ -133,7 +137,11 @@
     ```json
     {
       "status": "success",
-      "data": "Beijing: 25°C, Sunny"
+      "data": {
+        "stdout": "Beijing: 25°C, Sunny",
+        "stderror": "",
+        "exit_code": 0
+      }
     }
     ```
 
@@ -183,7 +191,11 @@
     ```json
     {
       "status": "success",
-      "data": "total 8\ndrwxr-xr-x 2 root root 4096 Jan 10 10:00 .\n..."
+      "data": {
+        "stdout": "total 8\ndrwxr-xr-x 2 root root 4096 Jan 10 10:00 .\n...",
+        "stderror": "",
+        "exit_code": 0
+      }
     }
     ```
 
@@ -217,11 +229,13 @@
     ```bash
     curl "http://localhost:8003/v1/sandbox/1001/agent001/content?path=temp.txt"
     ```
-*   **示例响应 1 (String)**:
+*   **示例响应**:
     ```json
     {
       "status": "success",
-      "data": "Hello General Sandbox content\nLine 2\nLine 3"
+      "data": {
+        "content": "Hello General Sandbox content\nLine 2\nLine 3"
+      }
     }
     ```
 *   **示例请求 2 (分页读取)**:
@@ -232,10 +246,12 @@
     ```json
     {
       "status": "success",
-      "data": [
-        "Hello General Sandbox content",
-        "Line 2"
-      ]
+      "data": {
+        "content": [
+          "Hello General Sandbox content",
+          "Line 2"
+        ]
+      }
     }
     ```
 

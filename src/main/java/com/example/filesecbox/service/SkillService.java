@@ -1,8 +1,7 @@
 package com.example.filesecbox.service;
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import com.example.filesecbox.model.SkillMetadata;
+import com.example.filesecbox.model.UploadResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -31,21 +30,6 @@ public class SkillService {
 
     @Autowired
     private StorageService storageService;
-
-    @Data
-    public static class SkillMetadata {
-        private String name;
-        private String description;
-    }
-
-    @Data
-    @AllArgsConstructor
-    @NoArgsConstructor
-    public static class UploadResponse {
-        private String skillName;
-        private String uploadPath;
-        private String status;
-    }
 
     public SkillService() throws IOException {
         Files.createDirectories(baselineRoot);

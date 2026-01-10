@@ -1,5 +1,6 @@
 package com.example.filesecbox.service;
 
+import com.example.filesecbox.model.ExecutionResult;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -93,7 +94,7 @@ public class SandboxService {
         });
     }
 
-    public String execute(String userId, String agentId, String command, String[] args) throws IOException {
+    public ExecutionResult execute(String userId, String agentId, String command, String[] args) throws Exception {
         Path workingDir = getSandboxDir(userId, agentId);
         return skillExecutor.executeInDir(workingDir, command, args);
     }

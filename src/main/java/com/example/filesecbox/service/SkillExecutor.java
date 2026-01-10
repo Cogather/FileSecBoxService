@@ -1,14 +1,17 @@
 package com.example.filesecbox.service;
 
+import com.example.filesecbox.model.ExecutionResult;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 @Service
 public class SkillExecutor {
@@ -24,7 +27,7 @@ public class SkillExecutor {
     /**
      * 在指定技能的工作目录下执行受限命令
      */
-    public String executeInDir(Path workingDir, String command, String... args) throws Exception {
+    public ExecutionResult executeInDir(Path workingDir, String command, String... args) throws Exception {
         // 1. 命令白名单校验
         if (!ALLOWED_COMMANDS.contains(command)) {
             throw new RuntimeException("Security Error: Command '" + command + "' is not allowed.");
@@ -39,17 +42,17 @@ public class SkillExecutor {
                 throw new RuntimeException("Security Error: Path traversal '..' is strictly forbidden.");
             }
 
-            // 拦截对系统敏感目录的任何形式引用 (即使是在命令字符串中间)
+            // 拦截对系统敏感目录的任何形式引用
             if (isSystemSensitivePath(lowerArg)) {
                 throw new RuntimeException("Security Error: Forbidden access to system paths in arguments.");
             }
 
-            // 严格绝对路径锚定：若参数以 / 开头，强制要求其物理路径位于当前技能目录下
+            // 严格绝对路径锚定
             if (arg.startsWith("/")) {
                 validateAbsoluteSkillPath(arg, workingDir);
             }
         }
-
+        
         // 3. 构建命令并强制锁定工作目录
         ProcessBuilder pb = new ProcessBuilder();
         List<String> cmdList = new ArrayList<>();
@@ -58,7 +61,8 @@ public class SkillExecutor {
         pb.command(cmdList);
         
         pb.directory(workingDir.toFile());
-        pb.redirectErrorStream(true);
+        // 不再合并错误流，以便分别获取 stdout 和 stderror
+        pb.redirectErrorStream(false);
         
         // 4. 环境净化
         Map<String, String> env = pb.environment();
@@ -67,18 +71,41 @@ public class SkillExecutor {
         env.put("PATH", "/usr/local/bin:/usr/bin:/bin");
 
         Process process = pb.start();
+        
+        // 异步读取流，防止缓冲区满导致挂起
+        StringBuilder stdoutBuilder = new StringBuilder();
+        StringBuilder stderrBuilder = new StringBuilder();
+        
+        Thread outThread = new Thread(() -> captureStream(process.getInputStream(), stdoutBuilder));
+        Thread errThread = new Thread(() -> captureStream(process.getErrorStream(), stderrBuilder));
+        
+        outThread.start();
+        errThread.start();
+
         boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
         if (!finished) {
             process.destroyForcibly();
             throw new RuntimeException("Execution timed out after 5 minutes.");
         }
+        
+        outThread.join(1000);
+        errThread.join(1000);
 
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-            String output = reader.lines().collect(Collectors.joining("\n"));
-            int exitCode = process.exitValue();
-            return "Exit Code: " + exitCode + "\nOutput:\n" + output;
-        }
+        return new ExecutionResult(
+            stdoutBuilder.toString().trim(),
+            stderrBuilder.toString().trim(),
+            process.exitValue()
+        );
+    }
+
+    private void captureStream(InputStream is, StringBuilder builder) {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                builder.append(line).append("\n");
+            }
+        } catch (IOException ignored) {}
     }
 
     private boolean isSystemSensitivePath(String arg) {

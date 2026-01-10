@@ -1,6 +1,10 @@
 package com.example.filesecbox.controller;
 
 import com.example.filesecbox.model.ApiResponse;
+import com.example.filesecbox.model.ExecutionResult;
+import com.example.filesecbox.model.FileContentResult;
+import com.example.filesecbox.model.SkillMetadata;
+import com.example.filesecbox.model.UploadResponse;
 import com.example.filesecbox.service.SkillExecutor;
 import com.example.filesecbox.service.SkillService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,7 +37,7 @@ public class SkillController {
             @RequestParam(required = false, defaultValue = "overlay") String scope,
             @RequestParam("file") MultipartFile file) {
         try {
-            List<SkillService.UploadResponse> responses = skillService.storeSkillZip(userId, agentId, file, scope);
+            List<UploadResponse> responses = skillService.storeSkillZip(userId, agentId, file, scope);
             String details = responses.stream()
                     .map(r -> String.format("skill '%s' to '%s'", r.getSkillName(), r.getUploadPath()))
                     .collect(Collectors.joining(", "));
@@ -45,7 +49,7 @@ public class SkillController {
 
     // 2. 获取技能列表
     @GetMapping("/{userId}/{agentId}/list")
-    public ResponseEntity<ApiResponse<List<SkillService.SkillMetadata>>> getSkillList(
+    public ResponseEntity<ApiResponse<List<SkillMetadata>>> getSkillList(
             @PathVariable String userId, @PathVariable String agentId) {
         try {
             return ResponseEntity.ok(ApiResponse.success(skillService.getSkills(userId, agentId)));
@@ -56,13 +60,13 @@ public class SkillController {
 
     // 3. 执行技能命令
     @PostMapping("/{userId}/{agentId}/{skillId}/execute")
-    public ResponseEntity<ApiResponse<String>> execute(
+    public ResponseEntity<ApiResponse<?>> execute(
             @PathVariable String userId, @PathVariable String agentId, @PathVariable String skillId,
             @RequestParam String command, @RequestBody(required = false) List<String> args) {
         try {
             Path workingDir = skillService.getSkillDir(userId, agentId, skillId);
             String[] argsArray = args != null ? args.toArray(new String[0]) : new String[0];
-            String result = skillExecutor.executeInDir(workingDir, command, argsArray);
+            ExecutionResult result = skillExecutor.executeInDir(workingDir, command, argsArray);
             return ResponseEntity.ok(ApiResponse.success(result));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
@@ -82,15 +86,16 @@ public class SkillController {
 
     // 5. 查看具体文件内容
     @GetMapping("/{userId}/{agentId}/{skillId}/content")
-    public ResponseEntity<ApiResponse<Object>> getFileContent(
+    public ResponseEntity<ApiResponse<FileContentResult>> getFileContent(
             @PathVariable String userId, @PathVariable String agentId, @PathVariable String skillId,
             @RequestParam String path,
             @RequestParam(required = false) Integer start,
             @RequestParam(required = false) Integer end) {
         try {
-            return ResponseEntity.ok(ApiResponse.success(skillService.readFile(userId, agentId, skillId, path, start, end)));
+            Object content = skillService.readFile(userId, agentId, skillId, path, start, end);
+            return ResponseEntity.ok(ApiResponse.success(new FileContentResult(content)));
         } catch (Exception e) {
-            return ResponseEntity.status(404).body(ApiResponse.error(e.getMessage()));
+            return ResponseEntity.status(404).body(ApiResponse.error(null));
         }
     }
 }

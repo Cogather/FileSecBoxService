@@ -1,6 +1,8 @@
 package com.example.filesecbox.controller;
 
 import com.example.filesecbox.model.ApiResponse;
+import com.example.filesecbox.model.ExecutionResult;
+import com.example.filesecbox.model.FileContentResult;
 import com.example.filesecbox.service.SandboxService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -35,14 +37,14 @@ public class SandboxController {
     }
 
     @PostMapping("/{userId}/{agentId}/execute")
-    public ResponseEntity<ApiResponse<String>> execute(
+    public ResponseEntity<ApiResponse<?>> execute(
             @PathVariable String userId,
             @PathVariable String agentId,
             @RequestParam String command,
             @RequestBody(required = false) List<String> args) {
         try {
             String[] argsArray = args != null ? args.toArray(new String[0]) : new String[0];
-            String result = sandboxService.execute(userId, agentId, command, argsArray);
+            ExecutionResult result = sandboxService.execute(userId, agentId, command, argsArray);
             return ResponseEntity.ok(ApiResponse.success(result));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(ApiResponse.error("Execution failed: " + e.getMessage()));
@@ -53,7 +55,7 @@ public class SandboxController {
      * 通用沙箱文件列表
      */
     @GetMapping("/{userId}/{agentId}/files")
-    public ResponseEntity<ApiResponse<List<String>>> listFiles(
+    public ResponseEntity<ApiResponse<?>> listFiles(
             @PathVariable String userId,
             @PathVariable String agentId) {
         try {
@@ -67,16 +69,17 @@ public class SandboxController {
      * 通用沙箱查看具体文件内容
      */
     @GetMapping("/{userId}/{agentId}/content")
-    public ResponseEntity<ApiResponse<Object>> getFileContent(
+    public ResponseEntity<ApiResponse<FileContentResult>> getFileContent(
             @PathVariable String userId,
             @PathVariable String agentId,
             @RequestParam String path,
             @RequestParam(required = false) Integer start,
             @RequestParam(required = false) Integer end) {
         try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.readFile(userId, agentId, path, start, end)));
+            Object content = sandboxService.readFile(userId, agentId, path, start, end);
+            return ResponseEntity.ok(ApiResponse.success(new FileContentResult(content)));
         } catch (Exception e) {
-            return ResponseEntity.status(404).body(ApiResponse.error(e.getMessage()));
+            return ResponseEntity.status(404).body(ApiResponse.error(null));
         }
     }
 }
