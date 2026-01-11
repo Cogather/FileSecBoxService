@@ -3,9 +3,11 @@ package com.example.filesecbox.service;
 import com.example.filesecbox.model.SkillMetadata;
 import com.example.filesecbox.model.UploadResponse;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.annotation.PostConstruct;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.charset.Charset;
@@ -24,16 +26,26 @@ import java.util.zip.ZipInputStream;
 @Service
 public class SkillService {
 
-    private final Path rootLocation = Paths.get("/webIde/product/skill").toAbsolutePath().normalize();
-    private final Path baselineRoot = rootLocation.resolve("baseline");
-    private final Path overlayRoot = rootLocation.resolve("overlay");
+    @Value("${app.skill.root:/webIde/product/skill}")
+    private String skillRootPath;
+
+    private Path rootLocation;
+    private Path baselineRoot;
+    private Path overlayRoot;
 
     @Autowired
     private StorageService storageService;
 
-    public SkillService() throws IOException {
+    @PostConstruct
+    public void init() throws IOException {
+        this.rootLocation = Paths.get(skillRootPath).toAbsolutePath().normalize();
+        this.baselineRoot = rootLocation.resolve("baseline");
+        this.overlayRoot = rootLocation.resolve("overlay");
         Files.createDirectories(baselineRoot);
         Files.createDirectories(overlayRoot);
+    }
+
+    public SkillService() {
     }
 
     /**
@@ -210,7 +222,9 @@ public class SkillService {
             Files.walkFileTree(targetDir, new SimpleFileVisitor<Path>() {
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    fileList.add(targetDir.relativize(file).toString());
+                    // 强制将路径分隔符统一为 /，兼容 Windows 本地验证
+                    String relativePath = targetDir.relativize(file).toString().replace('\\', '/');
+                    fileList.add(relativePath);
                     return FileVisitResult.CONTINUE;
                 }
             });
@@ -258,8 +272,16 @@ public class SkillService {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     String trimmed = line.trim();
-                    if (trimmed.toLowerCase().startsWith("name:")) meta.setName(trimmed.substring(5).trim());
-                    else if (trimmed.toLowerCase().startsWith("description:")) meta.setDescription(trimmed.substring(12).trim());
+                    // 过滤掉 YAML 分隔符
+                    if (trimmed.equals("---")) continue;
+
+                    // 兼容中文冒号 ：和 英文冒号 :
+                    String lowerLine = trimmed.toLowerCase();
+                    if (lowerLine.startsWith("name:") || lowerLine.startsWith("name：")) {
+                        meta.setName(trimmed.substring(trimmed.indexOf(trimmed.contains(":") ? ":" : "：") + 1).trim());
+                    } else if (lowerLine.startsWith("description:") || lowerLine.startsWith("description：")) {
+                        meta.setDescription(trimmed.substring(trimmed.indexOf(trimmed.contains(":") ? ":" : "：") + 1).trim());
+                    }
                 }
             } catch (IOException ignored) {}
         }

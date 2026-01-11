@@ -124,14 +124,12 @@
 
 *   **URL**: `POST /v1/skills/{userId}/{agentId}/{skillId}/execute`
 *   **请求方式**: `POST`
-*   **参数**: 
-    *   `command` (String, 必填): 白名单内的指令，如 `python3`
-*   **请求体**: `Array<String>` (参数列表)
+*   **请求体**: `JSON` (CommandRequest 对象)
 *   **示例请求**:
     ```bash
-    curl -X POST "http://localhost:8003/v1/skills/1001/agent001/weather_skill/execute?command=python3" \
+    curl -X POST "http://localhost:8003/v1/skills/1001/agent001/weather_skill/execute" \
          -H "Content-Type: application/json" \
-         -d '["main.py", "--city", "Beijing"]'
+         -d '{"command": "python3 main.py --city Beijing"}'
     ```
 *   **示例响应**:
     ```json
@@ -178,14 +176,12 @@
 
 *   **URL**: `POST /v1/sandbox/{userId}/{agentId}/execute`
 *   **请求方式**: `POST`
-*   **参数**: 
-    *   `command` (String, 必填): 指令名，如 `python3`, `ls` 等
-*   **请求体**: `Array<String>` (参数列表)
+*   **请求体**: `JSON` (CommandRequest 对象)
 *   **示例请求**:
     ```bash
-    curl -X POST "http://localhost:8003/v1/sandbox/1001/agent001/execute?command=ls" \
+    curl -X POST "http://localhost:8003/v1/sandbox/1001/agent001/execute" \
          -H "Content-Type: application/json" \
-         -d '["-la"]'
+         -d '{"command": "ls -la"}'
     ```
 *   **示例响应**:
     ```json

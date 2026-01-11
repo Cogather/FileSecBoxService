@@ -1,6 +1,7 @@
 package com.example.filesecbox.controller;
 
 import com.example.filesecbox.model.ApiResponse;
+import com.example.filesecbox.model.CommandRequest;
 import com.example.filesecbox.model.ExecutionResult;
 import com.example.filesecbox.model.FileContentResult;
 import com.example.filesecbox.model.SkillMetadata;
@@ -62,12 +63,25 @@ public class SkillController {
     @PostMapping("/{userId}/{agentId}/{skillId}/execute")
     public ResponseEntity<ApiResponse<?>> execute(
             @PathVariable String userId, @PathVariable String agentId, @PathVariable String skillId,
-            @RequestParam String command, @RequestBody(required = false) List<String> args) {
+            @RequestBody CommandRequest request) {
         try {
+            String commandLine = request.getCommand();
+            if (commandLine == null || commandLine.trim().isEmpty()) {
+                throw new RuntimeException("Command cannot be empty.");
+            }
+            
             Path workingDir = skillService.getSkillDir(userId, agentId, skillId);
-            String[] argsArray = args != null ? args.toArray(new String[0]) : new String[0];
-            ExecutionResult result = skillExecutor.executeInDir(workingDir, command, argsArray);
-            return ResponseEntity.ok(ApiResponse.success(result));
+            String[] parts = commandLine.trim().split("\\s+");
+            String cmd = parts[0];
+            String[] argsArray = parts.length > 1 ? 
+                    java.util.Arrays.copyOfRange(parts, 1, parts.length) : new String[0];
+
+            ExecutionResult result = skillExecutor.executeInDir(workingDir, cmd, argsArray);
+            if (result.getExitCode() == 0) {
+                return ResponseEntity.ok(ApiResponse.success(result));
+            } else {
+                return ResponseEntity.status(200).body(ApiResponse.error(result));
+            }
         } catch (Exception e) {
             return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
         }

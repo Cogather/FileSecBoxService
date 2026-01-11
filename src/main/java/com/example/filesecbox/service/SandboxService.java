@@ -135,7 +135,9 @@ public class SandboxService {
             Files.walkFileTree(baseDir, new SimpleFileVisitor<Path>() {
                 @Override
                 public java.nio.file.FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    fileList.add(baseDir.relativize(file).toString());
+                    // 强制将路径分隔符统一为 /，兼容 Windows 本地验证
+                    String relativePath = baseDir.relativize(file).toString().replace('\\', '/');
+                    fileList.add(relativePath);
                     return java.nio.file.FileVisitResult.CONTINUE;
                 }
             });

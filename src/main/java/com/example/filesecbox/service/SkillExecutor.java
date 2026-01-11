@@ -1,12 +1,14 @@
 package com.example.filesecbox.service;
 
 import com.example.filesecbox.model.ExecutionResult;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -16,75 +18,71 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class SkillExecutor {
 
+    @Value("${app.product.root:/webIde/product}")
+    private String productRoot;
+
     // 开放的基础指令白名单
     private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(Arrays.asList(
-            "python3", "bash", "sh", "ls", "cat", "echo", "grep", "sed",
+            "python", "python3", "bash", "sh", "ls", "cat", "echo", "grep", "sed",
             "mkdir", "touch", "cp", "mv", "rm", "tee", "find", "chmod", "xargs"
     ));
 
     private static final int TIMEOUT_SECONDS = 300; // 5分钟超时
 
-    /**
-     * 在指定技能的工作目录下执行受限命令
-     */
     public ExecutionResult executeInDir(Path workingDir, String command, String... args) throws Exception {
+        boolean isWin = System.getProperty("os.name").toLowerCase().contains("win");
+        Charset sysCharset = isWin ? Charset.forName("GBK") : StandardCharsets.UTF_8;
+
         // 1. 命令白名单校验
         if (!ALLOWED_COMMANDS.contains(command)) {
             throw new RuntimeException("Security Error: Command '" + command + "' is not allowed.");
         }
 
-        // 2. 深度参数安全校验 (针对 Root 权限环境)
+        // 2. 深度安全校验
         for (String arg : args) {
             String lowerArg = arg.toLowerCase();
-            
-            // 1. 严格禁止路径穿越逃逸
             if (lowerArg.contains("..")) {
                 throw new RuntimeException("Security Error: Path traversal '..' is strictly forbidden.");
             }
-
-            // 2. 拦截对系统敏感目录的引用
-            if (isSystemSensitivePath(lowerArg)) {
-                throw new RuntimeException("Security Error: Forbidden access to system paths in arguments.");
+            if (isSystemSensitivePath(lowerArg, isWin)) {
+                throw new RuntimeException("Security Error: Forbidden access to system paths: " + arg);
             }
-
-            // 3. 严格绝对路径锚定
-            // 无论绝对路径是独立参数还是在 --file=/path 中，均进行校验
-            if (arg.contains("/")) {
-                validatePathInArgument(arg, workingDir);
-            }
+            // 校验参数中隐藏的绝对路径
+            validatePathSecurity(arg, workingDir, isWin);
         }
-        
-        // 3. 构建命令并强制锁定工作目录
+
+        // 3. 进程构建
         ProcessBuilder pb = new ProcessBuilder();
         List<String> cmdList = new ArrayList<>();
         cmdList.add(command);
         cmdList.addAll(Arrays.asList(args));
         pb.command(cmdList);
-        
         pb.directory(workingDir.toFile());
-        // 不再合并错误流，以便分别获取 stdout 和 stderror
         pb.redirectErrorStream(false);
-        
-        // 4. 环境净化
-        Map<String, String> env = pb.environment();
-        Set<String> safeEnvVars = new HashSet<>(Arrays.asList("PATH", "LANG", "LC_ALL", "HOME", "USER", "PWD"));
-        env.keySet().removeIf(key -> !safeEnvVars.contains(key));
-        env.put("PATH", "/usr/local/bin:/usr/bin:/bin");
 
-        Process process = pb.start();
-        
-        // 异步读取流，防止缓冲区满导致挂起
+        // 4. 环境净化 (针对 Linux 生产环境)
+        Map<String, String> env = pb.environment();
+        if (!isWin) {
+            Set<String> safeEnvVars = new HashSet<>(Arrays.asList("PATH", "LANG", "LC_ALL", "HOME", "USER", "PWD"));
+            env.keySet().removeIf(key -> !safeEnvVars.contains(key));
+            env.put("PATH", "/usr/local/bin:/usr/bin:/bin");
+        }
+
+        Process process;
+        try {
+            process = pb.start();
+        } catch (IOException e) {
+            return new ExecutionResult("", "Failed to start process: " + e.getMessage(), 127);
+        }
+
         StringBuilder stdoutBuilder = new StringBuilder();
         StringBuilder stderrBuilder = new StringBuilder();
-        
-        Thread outThread = new Thread(() -> captureStream(process.getInputStream(), stdoutBuilder));
-        Thread errThread = new Thread(() -> captureStream(process.getErrorStream(), stderrBuilder));
-        
+        Thread outThread = new Thread(() -> captureStream(process.getInputStream(), stdoutBuilder, sysCharset));
+        Thread errThread = new Thread(() -> captureStream(process.getErrorStream(), stderrBuilder, sysCharset));
         outThread.start();
         errThread.start();
 
         boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-
         if (!finished) {
             process.destroyForcibly();
             throw new RuntimeException("Execution timed out after 5 minutes.");
@@ -100,8 +98,8 @@ public class SkillExecutor {
         );
     }
 
-    private void captureStream(InputStream is, StringBuilder builder) {
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+    private void captureStream(InputStream is, StringBuilder builder, Charset charset) {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, charset))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 builder.append(line).append("\n");
@@ -109,32 +107,45 @@ public class SkillExecutor {
         } catch (IOException ignored) {}
     }
 
-    private boolean isSystemSensitivePath(String arg) {
-        String[] sensitivePaths = {"/etc/", "/root/", "/proc/", "/dev/", "/sys/", "/boot/", "/var/", "/home/", "/bin/", "/usr/bin/", "/usr/sbin/"};
-        for (String path : sensitivePaths) {
-            if (arg.contains(path)) return true;
+    private boolean isSystemSensitivePath(String arg, boolean isWin) {
+        String[] linuxSensitive = {"/etc/", "/root/", "/proc/", "/dev/", "/sys/", "/boot/", "/var/", "/bin/", "/usr/bin/"};
+        String[] winSensitive = {"c:/windows/", "c:/users/", "c:/program files/", "system32"};
+        
+        String normArg = arg.replace("\\", "/");
+        for (String path : linuxSensitive) {
+            if (normArg.contains(path)) return true;
+        }
+        if (isWin) {
+            for (String path : winSensitive) {
+                if (normArg.contains(path)) return true;
+            }
         }
         return false;
     }
 
-    /**
-     * 校验参数中包含的路径是否合法
-     */
-    private void validatePathInArgument(String arg, Path workingDir) {
-        // 找到第一个 / 的位置
-        int slashIdx = arg.indexOf("/");
-        if (slashIdx == -1) return;
-
-        // 提取路径部分（例如从 --file=/tmp/123 提取出 /tmp/123）
-        String potentialPath = arg.substring(slashIdx);
+    private void validatePathSecurity(String arg, Path workingDir, boolean isWin) {
+        // 提取可能是路径的部分 (以 / 开头 或 包含盘符如 D:/)
+        String normArg = arg.replace("\\", "/");
+        String normRoot = Paths.get(productRoot).toAbsolutePath().normalize().toString().replace("\\", "/").toLowerCase();
         
-        // 如果路径指向的是 /webIde/product/ 目录，则必须以当前工作目录为前缀
-        // 如果是系统路径，已在 isSystemSensitivePath 中拦截
-        if (potentialPath.startsWith("/webIde/product/")) {
-            Path targetPath = Paths.get(potentialPath).normalize();
-            Path baseDir = workingDir.normalize();
-            if (!targetPath.startsWith(baseDir)) {
-                throw new RuntimeException("Security Error: Accessing path outside current scope: " + potentialPath);
+        // 如果参数包含产品根路径，则必须被限制在当前技能的工作目录下
+        if (normArg.toLowerCase().contains(normRoot)) {
+            try {
+                // 简单提取路径：找到 normRoot 出现的起始位置往后的部分
+                int start = normArg.toLowerCase().indexOf(normRoot);
+                String pathStr = arg.substring(start);
+                // 截取到空格或结束
+                int end = pathStr.indexOf(" ");
+                if (end != -1) pathStr = pathStr.substring(0, end);
+
+                Path targetPath = Paths.get(pathStr).toAbsolutePath().normalize();
+                Path baseDir = workingDir.toAbsolutePath().normalize();
+                
+                if (!targetPath.startsWith(baseDir)) {
+                    throw new RuntimeException("Security Error: Accessing path outside skill scope: " + pathStr);
+                }
+            } catch (Exception e) {
+                if (e instanceof RuntimeException) throw (RuntimeException) e;
             }
         }
     }
