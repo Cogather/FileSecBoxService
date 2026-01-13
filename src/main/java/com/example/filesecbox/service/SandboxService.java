@@ -1,33 +1,31 @@
 package com.example.filesecbox.service;
 
-import com.example.filesecbox.model.ExecutionResult;
+import com.example.filesecbox.model.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.PostConstruct;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.StandardOpenOption;
+import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
-/**
- * 通用沙箱服务：提供独立于 Skill 业务的文件操作与指令执行能力
- */
 @Service
 public class SandboxService {
 
-    @Value("${app.sandbox.root:/webIde/product/sandbox}")
-    private String sandboxRoot;
+    @Value("${app.product.root:/webIde/product}")
+    private String productRootPath;
+
+    private Path productRoot;
 
     @Autowired
     private StorageService storageService;
@@ -37,112 +35,234 @@ public class SandboxService {
 
     @PostConstruct
     public void init() throws IOException {
-        Path root = Paths.get(sandboxRoot);
-        if (!Files.exists(root)) {
-            Files.createDirectories(root);
-        }
+        this.productRoot = Paths.get(productRootPath).toAbsolutePath().normalize();
+        Files.createDirectories(productRoot);
     }
 
-    public Path getSandboxDir(String userId, String agentId) throws IOException {
-        Path dir = Paths.get(sandboxRoot, userId, agentId);
-        if (!Files.exists(dir)) {
-            Files.createDirectories(dir);
-        }
-        return dir.toAbsolutePath().normalize();
+    private Path getAgentRoot(String agentId) {
+        return productRoot.resolve(agentId).normalize();
     }
 
-    public void writeFile(String userId, String agentId, String relativePath, String content, Integer start, Integer end) throws IOException {
-        Path baseDir = getSandboxDir(userId, agentId);
-        Path targetPath = baseDir.resolve(relativePath).normalize();
+    /**
+     * 校验并转换逻辑路径为物理路径
+     */
+    private Path resolveLogicalPath(String agentId, String logicalPath) {
+        if (logicalPath == null) {
+            throw new RuntimeException("Security Error: Path cannot be null.");
+        }
         
-        // 安全校验
-        storageService.validateScope(targetPath, baseDir, null);
+        // 允许 skills, skills/, files, files/
+        boolean isValidPrefix = logicalPath.equals("skills") || logicalPath.startsWith("skills/") ||
+                               logicalPath.equals("files") || logicalPath.startsWith("files/");
+        
+        if (!isValidPrefix) {
+            throw new RuntimeException("Security Error: Path must start with 'skills/' or 'files/'. Current path: " + logicalPath);
+        }
+        Path agentRoot = getAgentRoot(agentId);
+        Path physicalPath = agentRoot.resolve(logicalPath).normalize();
+        storageService.validateScope(physicalPath, agentRoot);
+        return physicalPath;
+    }
 
-        String lockKey = userId + "/" + agentId;
-        storageService.writeLockedVoid(lockKey, () -> {
-            if (!Files.exists(targetPath.getParent())) {
-                Files.createDirectories(targetPath.getParent());
+    /**
+     * 1.1 上传技能
+     */
+    public String uploadSkillReport(String agentId, MultipartFile file) throws IOException {
+        Path skillsDir = getAgentRoot(agentId).resolve("skills");
+        Set<String> affectedSkills = new HashSet<>();
+
+        storageService.writeLockedVoid(agentId, () -> {
+            Files.createDirectories(skillsDir);
+            try (ZipInputStream zis = new ZipInputStream(file.getInputStream(), StandardCharsets.UTF_8)) {
+                scanAffectedSkills(zis, affectedSkills);
+            } catch (Exception e) {
+                try (ZipInputStream zisGbk = new ZipInputStream(file.getInputStream(), Charset.forName("GBK"))) {
+                    scanAffectedSkills(zisGbk, affectedSkills);
+                }
             }
+            for (String skillName : affectedSkills) {
+                storageService.deleteRecursively(skillsDir.resolve(skillName));
+            }
+            try (ZipInputStream zis = new ZipInputStream(file.getInputStream(), StandardCharsets.UTF_8)) {
+                extractZip(zis, skillsDir);
+            } catch (Exception e) {
+                try (ZipInputStream zisGbk = new ZipInputStream(file.getInputStream(), Charset.forName("GBK"))) {
+                    extractZip(zisGbk, skillsDir);
+                }
+            }
+        });
 
-            byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
+        StringBuilder sb = new StringBuilder("Upload successful. Details:\n");
+        for (String skill : affectedSkills) {
+            sb.append(String.format("- Skill [%s] uploaded to [%s], Status: [Success]\n", 
+                skill, skillsDir.resolve(skill).toString().replace('\\', '/')));
+        }
+        return sb.toString().trim();
+    }
 
-            if (start == null && end == null) {
-                storageService.writeBytes(targetPath, contentBytes, 
+    /**
+     * 1.2 获取技能描述列表
+     */
+    public List<SkillMetadata> getSkillList(String agentId) throws IOException {
+        Path skillsDir = getAgentRoot(agentId).resolve("skills");
+        if (!Files.exists(skillsDir)) return Collections.emptyList();
+
+        return storageService.readLocked(agentId, () -> {
+            List<SkillMetadata> metadataList = new ArrayList<>();
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(skillsDir)) {
+                for (Path entry : stream) {
+                    if (Files.isDirectory(entry)) {
+                        metadataList.add(parseSkillMd(entry));
+                    }
+                }
+            }
+            return metadataList;
+        });
+    }
+
+    /**
+     * 2.1 上传单一文件
+     */
+    public String uploadFile(String agentId, MultipartFile file) throws IOException {
+        Path filesDir = getAgentRoot(agentId).resolve("files");
+        String fileName = file.getOriginalFilename();
+        Path targetPath = filesDir.resolve(fileName).normalize();
+        
+        storageService.validateScope(targetPath, getAgentRoot(agentId));
+        
+        storageService.writeLockedVoid(agentId, () -> {
+            Files.createDirectories(filesDir);
+            Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+        });
+        return "File uploaded successfully: files/" + fileName;
+    }
+
+    /**
+     * 2.2 列出目录清单
+     */
+    public List<String> listFiles(String agentId, String logicalPrefix) throws IOException {
+        Path physicalRoot = resolveLogicalPath(agentId, logicalPrefix);
+        if (!Files.exists(physicalRoot)) throw new IOException("Path not found: " + logicalPrefix);
+
+        return storageService.readLocked(agentId, () -> {
+            try (Stream<Path> stream = Files.walk(physicalRoot)) {
+                return stream.filter(Files::isRegularFile)
+                        .map(file -> getAgentRoot(agentId).relativize(file).toString().replace('\\', '/'))
+                        .collect(Collectors.toList());
+            }
+        });
+    }
+
+    /**
+     * 2.3 读取文件内容
+     */
+    public FileContentResult getContent(String agentId, String logicalPath, Integer offset, Integer limit) throws IOException {
+        Path physicalPath = resolveLogicalPath(agentId, logicalPath);
+        if (!Files.exists(physicalPath)) throw new IOException("Path not found: " + logicalPath);
+
+        return storageService.readLocked(agentId, () -> {
+            List<String> lines;
+            try (Stream<String> lineStream = Files.lines(physicalPath, StandardCharsets.UTF_8)) {
+                if (offset != null && limit != null) {
+                    lines = lineStream.skip(Math.max(0, offset - 1))
+                                      .limit(Math.max(0, limit))
+                                      .collect(Collectors.toList());
+                } else {
+                    lines = lineStream.collect(Collectors.toList());
+                }
+            }
+            String content = String.join("\n", lines);
+            return new FileContentResult(content, lines);
+        });
+    }
+
+    /**
+     * 2.4 写入/新建文件
+     */
+    public String write(String agentId, WriteRequest request) throws IOException {
+        Path physicalPath = resolveLogicalPath(agentId, request.getFilePath());
+        storageService.writeLockedVoid(agentId, () -> {
+            storageService.writeBytes(physicalPath, request.getContent().getBytes(StandardCharsets.UTF_8),
                     StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-            } else {
-                List<String> lines = Files.exists(targetPath) ? 
-                    Files.readAllLines(targetPath, StandardCharsets.UTF_8) : new ArrayList<>();
-                
-                int startIdx = (start != null) ? Math.max(0, start - 1) : 0;
-                int endIdx = (end != null) ? Math.min(lines.size(), end) : lines.size();
-                
-                List<String> newLines = Arrays.asList(content.split("\\r?\\n"));
-                
-                while (lines.size() < startIdx) {
-                    lines.add("");
-                }
-                
-                List<String> updatedLines = new ArrayList<>();
-                updatedLines.addAll(lines.subList(0, startIdx));
-                updatedLines.addAll(newLines);
-                if (endIdx < lines.size()) {
-                    updatedLines.addAll(lines.subList(endIdx, lines.size()));
-                }
-                
-                Files.write(targetPath, updatedLines, StandardCharsets.UTF_8);
-            }
         });
-    }
-
-    public ExecutionResult execute(String userId, String agentId, String command, String[] args) throws Exception {
-        Path workingDir = getSandboxDir(userId, agentId);
-        return skillExecutor.executeInDir(workingDir, command, args);
+        return "Successfully created or overwritten file: " + request.getFilePath();
     }
 
     /**
-     * 读取沙箱文件内容 (支持全量/分页)
+     * 2.5 精确编辑/替换
      */
-    public Object readFile(String userId, String agentId, String relativePath, Integer start, Integer end) throws IOException {
-        Path baseDir = getSandboxDir(userId, agentId);
-        Path targetPath = baseDir.resolve(relativePath).normalize();
-        
-        storageService.validateScope(targetPath, baseDir, null);
-        if (!Files.exists(targetPath)) throw new IOException("File not found.");
+    public String edit(String agentId, EditRequest request) throws IOException {
+        Path physicalPath = resolveLogicalPath(agentId, request.getFilePath());
+        if (!Files.exists(physicalPath)) throw new IOException("Path not found: " + request.getFilePath());
 
-        String lockKey = userId + "/" + agentId;
-        return storageService.readLocked(lockKey, () -> {
-            if (start != null && end != null) {
-                try (Stream<String> lines = Files.lines(targetPath, StandardCharsets.UTF_8)) {
-                    return lines.skip(Math.max(0, start - 1))
-                                .limit(Math.max(0, end - start + 1))
-                                .collect(Collectors.toList());
-                }
-            } else {
-                return new String(storageService.readAllBytes(targetPath), StandardCharsets.UTF_8);
-            }
+        storageService.writeLockedVoid(agentId, () -> {
+            storageService.preciseEdit(physicalPath, request.getOldString(), request.getNewString(), request.getExpectedReplacements());
         });
+        return "Successfully edited file: " + request.getFilePath();
     }
 
     /**
-     * 列出沙箱目录下的所有文件
+     * 2.6 执行指令 (工作目录固定为应用根目录)
      */
-    public List<String> listFiles(String userId, String agentId) throws IOException {
-        Path baseDir = getSandboxDir(userId, agentId);
-        String lockKey = userId + "/" + agentId;
-        
-        return storageService.readLocked(lockKey, () -> {
-            List<String> fileList = new ArrayList<>();
-            Files.walkFileTree(baseDir, new SimpleFileVisitor<Path>() {
-                @Override
-                public java.nio.file.FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    // 强制将路径分隔符统一为 /，兼容 Windows 本地验证
-                    String relativePath = baseDir.relativize(file).toString().replace('\\', '/');
-                    fileList.add(relativePath);
-                    return java.nio.file.FileVisitResult.CONTINUE;
+    public ExecutionResult execute(String agentId, CommandRequest request) throws Exception {
+        Path agentRoot = getAgentRoot(agentId);
+        if (!Files.exists(agentRoot)) Files.createDirectories(agentRoot);
+
+        String commandLine = request.getCommand().trim();
+        String[] parts = commandLine.split("\\s+");
+        String cmd = parts[0];
+        String[] args = parts.length > 1 ? Arrays.copyOfRange(parts, 1, parts.length) : new String[0];
+
+        return skillExecutor.executeInDir(agentRoot, cmd, args);
+    }
+
+    // --- 内部辅助方法 ---
+
+    private void scanAffectedSkills(ZipInputStream zis, Set<String> skills) throws IOException {
+        ZipEntry entry;
+        while ((entry = zis.getNextEntry()) != null) {
+            String name = entry.getName();
+            int slash = name.indexOf('/');
+            if (slash != -1) skills.add(name.substring(0, slash));
+            else if (entry.isDirectory()) skills.add(name);
+            zis.closeEntry();
+        }
+    }
+
+    private void extractZip(ZipInputStream zis, Path targetDir) throws IOException {
+        ZipEntry entry;
+        while ((entry = zis.getNextEntry()) != null) {
+            Path entryPath = targetDir.resolve(entry.getName()).normalize();
+            if (entry.isDirectory()) Files.createDirectories(entryPath);
+            else {
+                Files.createDirectories(entryPath.getParent());
+                Files.copy(zis, entryPath, StandardCopyOption.REPLACE_EXISTING);
+            }
+            zis.closeEntry();
+        }
+    }
+
+    private SkillMetadata parseSkillMd(Path skillPath) {
+        Path mdPath = skillPath.resolve("SKILL.md");
+        SkillMetadata meta = new SkillMetadata();
+        meta.setName(skillPath.getFileName().toString());
+        meta.setDescription("No description available.");
+        if (Files.exists(mdPath)) {
+            try (BufferedReader reader = Files.newBufferedReader(mdPath, StandardCharsets.UTF_8)) {
+                String line;
+                boolean inYaml = false;
+                while ((line = reader.readLine()) != null) {
+                    String trimmed = line.trim();
+                    if (trimmed.equals("---")) { inYaml = !inYaml; continue; }
+                    String lower = trimmed.toLowerCase();
+                    if (lower.startsWith("name:") || lower.startsWith("name：")) {
+                        meta.setName(trimmed.substring(trimmed.indexOf(trimmed.contains(":")?":":"：")+1).trim());
+                    } else if (lower.startsWith("description:") || lower.startsWith("description：")) {
+                        meta.setDescription(trimmed.substring(trimmed.indexOf(trimmed.contains(":")?":":"：")+1).trim());
+                    }
                 }
-            });
-            return fileList;
-        });
+            } catch (IOException ignored) {}
+        }
+        return meta;
     }
 }
-

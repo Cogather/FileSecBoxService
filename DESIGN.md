@@ -1,167 +1,59 @@
 # FileSecBoxService 设计文档
 
 ## 1. 整体架构
-FileSecBoxService 是一个面向应用开发平台的安全沙箱执行引擎。它采用“分层存储”与“写时复制”技术，实现在 Root 权限容器内逻辑隔离应用公共技能、用户泛化技能以及通用的沙箱临时工作区。
+FileSecBoxService 是一个基于应用（Agent）维度隔离的安全沙箱服务。系统通过逻辑路径前缀（`skills/` 和 `files/`）实现业务功能分流，并在 Root 权限环境下通过严格的路径归一化、指令白名单及环境清理手段保障执行安全。
 
 ---
 
-## 2. 视图模型
+## 2. 存储设计
 
-### 2.1 场景视图
-描述用户与沙箱服务的核心交互场景。
+### 2.1 物理目录布局
+所有应用数据均存储在统一的产品根目录下，实现应用间的物理隔离。
 
-```plantuml
-@startuml
-left to right direction
-actor "用户" as user
-package "沙箱服务" {
-  usecase "技能上传与解压" as UC1
-  usecase "技能列表查询" as UC2
-  usecase "文件读取与编辑" as UC3
-  usecase "安全指令执行" as UC4
-  usecase "通用隔离区操作" as UC5
-}
-user --> UC1
-user --> UC2
-user --> UC3
-user --> UC4
-user --> UC5
-@endum
-```
+| 业务模块 | 逻辑路径前缀 | 物理存储路径 | 存放内容枚举 |
+| :--- | :--- | :--- | :--- |
+| **技能模块** | `skills/` | `/webIde/product/{agentId}/skills/` | 技能元数据（SKILL.md）、业务 Python 脚本、技能私有配置。 |
+| **通用文件模块** | `files/` | `/webIde/product/{agentId}/files/` | 统一的沙箱文件处理代码、公共环境配置、工具类脚本。 |
 
-### 2.2 交互视图
-描述平台端、Agent 引擎（SDK）与沙箱服务的交互协作关系。
-
-```plantuml
-@startuml
-participant "平台端" as P
-participant "Agent 引擎" as SDK
-participant "沙箱服务" as S
-database "DB (Registry)" as DB
-database "文件系统" as FS
-
-== 初始化：获取技能列表 ==
-P -> SDK: 请求可用技能
-SDK -> S: GET /v1/skills/{userId}/{agentId}/list
-S -> FS: 扫描 baseline 与 overlay 目录并合并
-S --> SDK: 返回合并后的结构化列表
-SDK --> P: 返回技能清单
-
-== 执行阶段：请求执行指令 ==
-P -> SDK: 执行指令 (JSON: {command: "..."})
-SDK -> S: POST /v1/skills/.../execute
-S -> S: 路径安全校验 (归一化、跨平台适配)
-S -> S: 指令白名单过滤与环境净化
-S -> FS: 在工作目录下安全执行
-S --> SDK: 返回 ExecutionResult (stdout, stderr, exit_code)
-SDK --> P: 响应结果
-
-== 泛化流程：写时复制 ==
-P -> SDK: 编辑公共技能文件
-SDK -> S: PUT /v1/skills/.../edit
-S -> FS: 探测文件层级
-alt 文件在 baseline 且 overlay 无副本
-    S -> FS: 执行 COW (物理拷贝至 overlay)
-end
-S -> FS: 将修改写入 overlay 副本
-S --> SDK: 成功
-@endum
-```
-
-### 2.3 物理视图
-描述磁盘目录的分层布局。
-
-```plantuml
-@startuml
-node "Storage Root (可配置: app.product.root)" {
-    folder "skill (技能目录)" {
-        folder "baseline (应用公共技能)" {
-            folder "{agentId}"
-        }
-        folder "overlay (用户覆盖层)" {
-            folder "{userId}" {
-                folder "{agentId}"
-            }
-        }
-    }
-    folder "sandbox (通用隔离工作区)" {
-        folder "{userId}" {
-            folder "{agentId}"
-        }
-    }
-}
-@endum
-```
+### 2.2 路径校验准则
+*   **前缀强制性**：所有 I/O 接口接收的路径参数（`path` 或 `file_path`）必须且只能以 `skills/` 或 `files/` 作为起始字符串。
+*   **归一化校验**：系统在操作前必须对路径进行 `normalize` 处理，防止通过 `../` 进行路径穿越。
+*   **锚定校验**：物理路径通过 `productRoot.resolve(agentId).resolve(logicalPath)` 计算得到。系统必须校验最终物理路径是否位于 `/webIde/product/{agentId}/` 范围内。
 
 ---
 
-## 3. Skill 模块设计
+## 3. 核心功能设计
 
-### 3.1 存储与分层策略
-*   **分层合并逻辑**: 
-    1.  **优先级**: 用户覆盖层 (`overlay`) 优先级高于应用公共技能层 (`baseline`)。
-    2.  **查询合并**: 查询列表时，沙箱合并两层目录；若存在同名技能，优先展示 `overlay` 内容。
-    3.  **合并读取**: 读取文件时，首选 `overlay` 路径，缺失则回退至 `baseline`。
-*   **写时复制 (Copy-on-Write)**: 
-    *   当用户编辑属于 `baseline` 的文件时，系统自动在 `overlay` 对应目录下创建该文件的物理副本，后续修改均作用于副本，确保原始基线不被破坏。
-*   **线程安全**: 采用 `ReentrantReadWriteLock` 实现按“用户+应用”维度的细粒度锁，确保读写不互斥、读读并发、写写互斥，且读操作在锁释放前完成内存映射（快照读取）。
+### 3.1 文件管理逻辑
+*   **全量写入 (Write)**：直接在目标物理路径创建或覆盖文件。
+*   **分页读取 (Content)**：支持通过 `offset`（起始行号，从 1 开始）和 `limit`（读取行数）参数进行行级分页读取，减少内存负载。
+*   **精确编辑 (Edit)**：
+    *   **匹配机制**：系统读取文件后，寻找 `old_string` 的位置。
+    *   **冲突校验**：通过 `expected_replacements` 参数校验匹配到的次数。若实际匹配次数与预期不符，直接返回错误，不执行替换。
+    *   **原子性**：替换操作在内存完成后一次性写回文件。
 
-### 3.2 技能生命周期管理
-*   **上传与解压**:
-    *   **多编码兼容**: ZIP 包解压支持“双尝试”机制。首选 `UTF-8`；若失败（如 MALFORMED 异常），自动回退至 `GBK` 编码。
-    *   **干净覆盖**: 上传同名技能时，采用“先递归删除目标路径、后执行解压”策略，确保技能版本的干净替换。
-*   **元数据解析**:
-    *   自动扫描技能根目录下的 `SKILL.md`。
-    *   支持过滤 YAML 格式分隔符（`---`）。
-    *   兼容中英文冒号（`:` 与 `：`）提取 `name` 和 `description` 字段。若缺失则降级使用文件夹名。
+### 3.2 技能生命周期
+*   **上传 (Upload)**：接收 ZIP 压缩包，解压至该应用的技能物理目录。支持 `UTF-8` 和 `GBK` 双编码兼容处理。
+*   **解析**：自动扫描并解析 `SKILL.md`，提取 `name` 和 `description` 字段。
 
-### 3.3 安全执行引擎
-*   **指令白名单**: 严格限制仅允许以下指令执行：
-    `python`, `python3`, `bash`, `sh`, `ls`, `cat`, `echo`, `grep`, `sed`, `mkdir`, `touch`, `cp`, `mv`, `rm`, `tee`, `find`, `chmod`, `xargs`, `curl`
-*   **环境变量净化 (Linux 环境)**:
-    *   **清理策略**: 删除所有非白名单环境变量。
-    *   **保留白名单**: `PATH`, `LANG`, `LC_ALL`, `HOME`, `USER`, `PWD`
-    *   **PATH 重置**: 强制设定为 `/usr/local/bin:/usr/bin:/bin`
-*   **跨平台路径安全校验**:
-    *   **Windows 适配**: 自动识别盘符（如 `D:/`），处理路径分隔符（统一转为 `/`），支持 GBK 编码传输。
-    *   **内嵌路径扫描**: 扫描命令行中所有包含绝对路径的部分。若参数包含产品根路径（`app.product.root`），强制要求其物理锚定在当前技能或沙箱工作区内。
-    *   **敏感目录拦截**: 
-        *   **Linux**: `/etc/`, `/root/`, `/proc/`, `/dev/`, `/sys/`, `/boot/`, `/var/`, `/bin/`, `/usr/bin/`
-        *   **Windows**: `c:/windows/`, `c:/users/`, `c:/program files/`, `system32`
-*   **执行保障**: 采用异步流读取，独立获取 `stdout` 与 `stderror`，设定 5 分钟硬性超时时间。
+### 3.3 安全执行引擎 (Execute)
+*   **工作目录**：必须锚定在逻辑路径对应的物理目录下。
+*   **指令白名单**：严格限制仅允许执行以下指令：`python`, `python3`, `bash`, `sh`, `ls`, `cat`, `echo`, `grep`, `sed`, `mkdir`, `touch`, `cp`, `mv`, `rm`, `tee`, `find`, `chmod`, `xargs`, `curl`。
+*   **环境净化**：
+    *   **Linux**：清理所有非安全环境变量，强制设置 `PATH=/usr/local/bin:/usr/bin:/bin`。
+    *   **Windows**：识别盘符，统一路径分隔符为 `/`，适配系统字符编码。
+*   **超时控制**：强制设定 5 分钟（300 秒）执行超时。
 
 ---
 
-## 4. 平台端设计
-
-### 4.1 技能注册映射 (Platform Mapping)
-*   **单表注册制**: 平台端通过 `agent_skill_registry` 表管理技能归属。
-    *   **逻辑判定**:
-        *   `userId IS NULL`: 该技能记录属于应用的“基线公共技能”，对应沙箱 `baseline` 目录。
-        *   `userId = '真实工号'`: 该技能记录属于用户的“私有泛化技能”，对应沙箱 `overlay` 目录。
-*   **冲突视图**: 若同一 `skillId` 同时存在基线与私有记录，前端列表优先展示私有记录并标识为“已泛化”。
+## 4. 并发与可靠性
+*   **锁粒度**：采用 `ReentrantReadWriteLock` 实现按 `agentId` 维度的线程锁。
+*   **读写分离**：文件读取接口使用读锁，写入和修改接口使用写锁，确保在高并发下文件不损坏。
 
 ---
 
-## 5. 通用沙箱模块设计
-*   **定位**: 提供与特定技能无关的临时隔离空间，物理路径为 `${app.product.root}/sandbox/{userId}/{agentId}/`。
-*   **功能集**:
-    1.  **文件编辑**: 支持创建路径及局部行替换。
-    2.  **清单列出**: 递归列出所有文件，路径分隔符统一为 `/`。
-    3.  **内容读取**: 支持全量 (String) 或 分页 (List<String>) 的对象化返回。
-    4.  **安全执行**: 共享技能模块的安全引擎校验。
-
----
-
-## 6. 技术实现细节
-
-### 6.1 统一响应模型 (ApiResponse)
-所有接口统一返回 JSON 结构：`{"status": "success/error", "data": <T>}`。
-
-### 6.2 执行结果模型 (ExecutionResult)
-执行接口返回包含 `stdout`, `stderror`, `exit_code` 的结构化对象。
-
-### 6.3 开发环境要求
+## 5. 技术栈枚举
 *   **JDK**: 1.8
-*   **Spring Boot**: 2.3.12.RELEASE
-*   **核心库**: Java NIO, Project Lombok, Spring Security
+*   **Framework**: Spring Boot 2.3.12.RELEASE
+*   **Build Tool**: Maven 3.6
+*   **OS Support**: Linux (Production), Windows (Validation)

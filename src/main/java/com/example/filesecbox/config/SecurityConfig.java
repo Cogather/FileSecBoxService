@@ -2,23 +2,14 @@ package com.example.filesecbox.config;
 
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
 
 @Configuration
-@EnableWebSecurity
 public class SecurityConfig extends WebSecurityConfigurerAdapter {
-
     @Override
     protected void configure(HttpSecurity http) throws Exception {
-        http
-            .csrf().disable()
+        http.csrf().disable() // 彻底禁用 CSRF 校验
             .authorizeRequests()
-            .antMatchers("/v1/skills/**").permitAll() 
-            .anyRequest().authenticated()
-            .and()
-            .headers()
-            .contentSecurityPolicy("default-src 'self'");
+            .anyRequest().permitAll(); // 测试期间允许所有请求，不再校验 Basic Auth
     }
 }
-

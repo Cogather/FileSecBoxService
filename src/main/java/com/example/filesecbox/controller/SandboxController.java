@@ -1,99 +1,109 @@
 package com.example.filesecbox.controller;
 
-import com.example.filesecbox.model.ApiResponse;
-import com.example.filesecbox.model.CommandRequest;
-import com.example.filesecbox.model.ExecutionResult;
-import com.example.filesecbox.model.FileContentResult;
+import com.example.filesecbox.model.*;
 import com.example.filesecbox.service.SandboxService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
-import java.util.List;
-
-/**
- * 通用沙箱能力接口：移除 skills 前缀，提供更广泛的沙箱隔离操作
- */
 @RestController
-@RequestMapping("/v1/sandbox")
+@RequestMapping("/v1")
 public class SandboxController {
 
     @Autowired
     private SandboxService sandboxService;
 
-    @PutMapping("/{userId}/{agentId}/edit")
-    public ResponseEntity<ApiResponse<String>> editFile(
-            @PathVariable String userId,
+    // --- 1. 技能管理 ---
+
+    @PostMapping("/skills/{agentId}/upload")
+    public ResponseEntity<ApiResponse<?>> uploadSkill(
             @PathVariable String agentId,
-            @RequestParam String path,
-            @RequestParam(required = false) Integer start,
-            @RequestParam(required = false) Integer end,
-            @RequestBody String content) {
+            @RequestParam("file") MultipartFile file) {
         try {
-            sandboxService.writeFile(userId, agentId, path, content, start, end);
-            return ResponseEntity.ok(ApiResponse.success("Sandbox file updated successfully."));
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(ApiResponse.error("Edit failed: " + e.getMessage()));
-        }
-    }
-
-    @PostMapping("/{userId}/{agentId}/execute")
-    public ResponseEntity<ApiResponse<?>> execute(
-            @PathVariable String userId,
-            @PathVariable String agentId,
-            @RequestBody CommandRequest request) {
-        try {
-            String commandLine = request.getCommand();
-            if (commandLine == null || commandLine.trim().isEmpty()) {
-                throw new RuntimeException("Command cannot be empty.");
-            }
-
-            String[] parts = commandLine.trim().split("\\s+");
-            String cmd = parts[0];
-            String[] argsArray = parts.length > 1 ? 
-                    java.util.Arrays.copyOfRange(parts, 1, parts.length) : new String[0];
-
-            ExecutionResult result = sandboxService.execute(userId, agentId, cmd, argsArray);
-            if (result.getExitCode() == 0) {
-                return ResponseEntity.ok(ApiResponse.success(result));
-            } else {
-                return ResponseEntity.status(200).body(ApiResponse.error(result));
-            }
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(ApiResponse.error("Execution failed: " + e.getMessage()));
-        }
-    }
-
-    /**
-     * 通用沙箱文件列表
-     */
-    @GetMapping("/{userId}/{agentId}/files")
-    public ResponseEntity<ApiResponse<?>> listFiles(
-            @PathVariable String userId,
-            @PathVariable String agentId) {
-        try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.listFiles(userId, agentId)));
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.uploadSkillReport(agentId, file)));
         } catch (Exception e) {
             return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
         }
     }
 
-    /**
-     * 通用沙箱查看具体文件内容
-     */
-    @GetMapping("/{userId}/{agentId}/content")
-    public ResponseEntity<ApiResponse<FileContentResult>> getFileContent(
-            @PathVariable String userId,
-            @PathVariable String agentId,
-            @RequestParam String path,
-            @RequestParam(required = false) Integer start,
-            @RequestParam(required = false) Integer end) {
+    @GetMapping("/skills/{agentId}/list")
+    public ResponseEntity<ApiResponse<?>> getSkillList(@PathVariable String agentId) {
         try {
-            Object content = sandboxService.readFile(userId, agentId, path, start, end);
-            return ResponseEntity.ok(ApiResponse.success(new FileContentResult(content)));
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.getSkillList(agentId)));
         } catch (Exception e) {
-            return ResponseEntity.status(404).body(ApiResponse.error(null));
+            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    // --- 2. 文件与执行管理 ---
+
+    @PostMapping("/files/{agentId}/upload")
+    public ResponseEntity<ApiResponse<?>> uploadFile(
+            @PathVariable String agentId,
+            @RequestParam("file") MultipartFile file) {
+        try {
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.uploadFile(agentId, file)));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    @GetMapping("/{agentId}/files")
+    public ResponseEntity<ApiResponse<?>> listFiles(
+            @PathVariable String agentId,
+            @RequestParam("path") String path) {
+        try {
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.listFiles(agentId, path)));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    @GetMapping("/{agentId}/content")
+    public ResponseEntity<ApiResponse<?>> getContent(
+            @PathVariable String agentId,
+            @RequestParam("path") String path,
+            @RequestParam(value = "offset", required = false) Integer offset,
+            @RequestParam(value = "limit", required = false) Integer limit) {
+        try {
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.getContent(agentId, path, offset, limit)));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    @PostMapping("/{agentId}/write")
+    public ResponseEntity<ApiResponse<?>> write(
+            @PathVariable String agentId,
+            @RequestBody WriteRequest request) {
+        try {
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.write(agentId, request)));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    @PostMapping("/{agentId}/edit")
+    public ResponseEntity<ApiResponse<?>> edit(
+            @PathVariable String agentId,
+            @RequestBody EditRequest request) {
+        try {
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.edit(agentId, request)));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    @PostMapping("/{agentId}/execute")
+    public ResponseEntity<ApiResponse<?>> execute(
+            @PathVariable String agentId,
+            @RequestBody CommandRequest request) {
+        try {
+            ExecutionResult result = sandboxService.execute(agentId, request);
+            return ResponseEntity.ok(ApiResponse.success(result));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
         }
     }
 }
-

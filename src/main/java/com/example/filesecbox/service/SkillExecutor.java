@@ -21,10 +21,10 @@ public class SkillExecutor {
     @Value("${app.product.root:/webIde/product}")
     private String productRoot;
 
-    // 开放的基础指令白名单
+    // 开放的基础指令白名单 (对齐 DESIGN.md)
     private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(Arrays.asList(
             "python", "python3", "bash", "sh", "ls", "cat", "echo", "grep", "sed",
-            "mkdir", "touch", "cp", "mv", "rm", "tee", "find", "chmod", "xargs"
+            "mkdir", "touch", "cp", "mv", "rm", "tee", "find", "chmod", "xargs", "curl"
     ));
 
     private static final int TIMEOUT_SECONDS = 300; // 5分钟超时
@@ -33,25 +33,20 @@ public class SkillExecutor {
         boolean isWin = System.getProperty("os.name").toLowerCase().contains("win");
         Charset sysCharset = isWin ? Charset.forName("GBK") : StandardCharsets.UTF_8;
 
-        // 1. 命令白名单校验
+        // 1. 指令白名单校验
         if (!ALLOWED_COMMANDS.contains(command)) {
-            throw new RuntimeException("Security Error: Command '" + command + "' is not allowed.");
+            throw new RuntimeException("Security Error: Command '" + command + "' is not allowed in whitelist.");
         }
 
-        // 2. 深度安全校验
+        // 2. 参数深度校验
         for (String arg : args) {
-            String lowerArg = arg.toLowerCase();
-            if (lowerArg.contains("..")) {
+            if (arg.contains("..")) {
                 throw new RuntimeException("Security Error: Path traversal '..' is strictly forbidden.");
             }
-            if (isSystemSensitivePath(lowerArg, isWin)) {
-                throw new RuntimeException("Security Error: Forbidden access to system paths: " + arg);
-            }
-            // 校验参数中隐藏的绝对路径
             validatePathSecurity(arg, workingDir, isWin);
         }
 
-        // 3. 进程构建
+        // 3. 构建进程
         ProcessBuilder pb = new ProcessBuilder();
         List<String> cmdList = new ArrayList<>();
         cmdList.add(command);
@@ -60,7 +55,7 @@ public class SkillExecutor {
         pb.directory(workingDir.toFile());
         pb.redirectErrorStream(false);
 
-        // 4. 环境净化 (针对 Linux 生产环境)
+        // 4. 环境净化 (Linux)
         Map<String, String> env = pb.environment();
         if (!isWin) {
             Set<String> safeEnvVars = new HashSet<>(Arrays.asList("PATH", "LANG", "LC_ALL", "HOME", "USER", "PWD"));
@@ -85,7 +80,7 @@ public class SkillExecutor {
         boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         if (!finished) {
             process.destroyForcibly();
-            throw new RuntimeException("Execution timed out after 5 minutes.");
+            throw new RuntimeException("Execution Timeout: Process killed after " + TIMEOUT_SECONDS + " seconds.");
         }
         
         outThread.join(1000);
@@ -107,45 +102,15 @@ public class SkillExecutor {
         } catch (IOException ignored) {}
     }
 
-    private boolean isSystemSensitivePath(String arg, boolean isWin) {
-        String[] linuxSensitive = {"/etc/", "/root/", "/proc/", "/dev/", "/sys/", "/boot/", "/var/", "/bin/", "/usr/bin/"};
-        String[] winSensitive = {"c:/windows/", "c:/users/", "c:/program files/", "system32"};
-        
-        String normArg = arg.replace("\\", "/");
-        for (String path : linuxSensitive) {
-            if (normArg.contains(path)) return true;
-        }
-        if (isWin) {
-            for (String path : winSensitive) {
-                if (normArg.contains(path)) return true;
-            }
-        }
-        return false;
-    }
-
     private void validatePathSecurity(String arg, Path workingDir, boolean isWin) {
-        // 提取可能是路径的部分 (以 / 开头 或 包含盘符如 D:/)
-        String normArg = arg.replace("\\", "/");
         String normRoot = Paths.get(productRoot).toAbsolutePath().normalize().toString().replace("\\", "/").toLowerCase();
+        String normArg = arg.replace("\\", "/").toLowerCase();
         
-        // 如果参数包含产品根路径，则必须被限制在当前技能的工作目录下
-        if (normArg.toLowerCase().contains(normRoot)) {
-            try {
-                // 简单提取路径：找到 normRoot 出现的起始位置往后的部分
-                int start = normArg.toLowerCase().indexOf(normRoot);
-                String pathStr = arg.substring(start);
-                // 截取到空格或结束
-                int end = pathStr.indexOf(" ");
-                if (end != -1) pathStr = pathStr.substring(0, end);
-
-                Path targetPath = Paths.get(pathStr).toAbsolutePath().normalize();
-                Path baseDir = workingDir.toAbsolutePath().normalize();
-                
-                if (!targetPath.startsWith(baseDir)) {
-                    throw new RuntimeException("Security Error: Accessing path outside skill scope: " + pathStr);
-                }
-            } catch (Exception e) {
-                if (e instanceof RuntimeException) throw (RuntimeException) e;
+        // 如果参数中包含产品根路径，则必须被限制在当前的工作目录下
+        if (normArg.contains(normRoot)) {
+            Path targetPath = Paths.get(arg).toAbsolutePath().normalize();
+            if (!targetPath.startsWith(workingDir.toAbsolutePath().normalize())) {
+                throw new RuntimeException("Security Error: Accessing path outside workspace scope: " + arg);
             }
         }
     }
