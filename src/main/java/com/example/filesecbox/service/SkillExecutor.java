@@ -69,6 +69,22 @@ public class SkillExecutor {
                         !normalized.equals("skills") && !normalized.equals("files")) {
                         throw new RuntimeException("Security Error: Path '" + potentialPath + "' is out of operable scope. Must start with 'skills/' or 'files/'.");
                     }
+
+                    // --- 新增：自动创建目录逻辑 (增强版) ---
+                    try {
+                        // 统一转为正斜杠处理
+                        String cleanPath = potentialPath.replace('\\', '/');
+                        Path targetPath = workingDir.resolve(cleanPath).normalize();
+                        
+                        // 只有在路径确实指向一个文件（带点）时才取 Parent
+                        Path dirToCreate = cleanPath.contains(".") ? targetPath.getParent() : targetPath;
+                        
+                        if (dirToCreate != null && !java.nio.file.Files.exists(dirToCreate)) {
+                            java.nio.file.Files.createDirectories(dirToCreate);
+                        }
+                    } catch (Exception e) {
+                        // 忽略解析失败，由后续执行器抛出具体错误
+                    }
                 }
             }
         }
