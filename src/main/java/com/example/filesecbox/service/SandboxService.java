@@ -21,6 +21,8 @@ import java.util.zip.ZipInputStream;
 @Service
 public class SandboxService {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SandboxService.class);
+
     @Value("${app.product.root.win:D:/webIde/product}")
     private String productRootWin;
 
@@ -42,6 +44,7 @@ public class SandboxService {
         
         this.productRoot = Paths.get(finalPath).toAbsolutePath().normalize();
         Files.createDirectories(productRoot);
+        log.info("Sandbox Service initialized with product root: {}", productRoot);
     }
 
     private Path getAgentRoot(String agentId) {
@@ -55,10 +58,15 @@ public class SandboxService {
      */
     private void ensureAgentDirs(Path agentRoot) {
         try {
-            Files.createDirectories(agentRoot.resolve("skills"));
-            Files.createDirectories(agentRoot.resolve("files"));
+            if (!Files.exists(agentRoot.resolve("skills"))) {
+                Files.createDirectories(agentRoot.resolve("skills"));
+            }
+            if (!Files.exists(agentRoot.resolve("files"))) {
+                Files.createDirectories(agentRoot.resolve("files"));
+            }
         } catch (IOException e) {
-            throw new RuntimeException("Failed to initialize agent directories for: " + agentRoot, e);
+            log.error("Failed to initialize agent directories for: {}", agentRoot, e);
+            throw new RuntimeException("Failed to initialize agent directories", e);
         }
     }
 
@@ -87,14 +95,17 @@ public class SandboxService {
      * 1.1 上传技能
      */
     public String uploadSkillReport(String agentId, MultipartFile file) throws IOException {
+        log.info("Starting skill upload for agent: {}, file: {}", agentId, file.getOriginalFilename());
         Path skillsDir = getAgentRoot(agentId).resolve("skills");
         Set<String> affectedSkills = new HashSet<>();
 
         storageService.writeLockedVoid(agentId, () -> {
+            long start = System.currentTimeMillis();
             Files.createDirectories(skillsDir);
             try (ZipInputStream zis = new ZipInputStream(file.getInputStream(), StandardCharsets.UTF_8)) {
                 scanAffectedSkills(zis, affectedSkills);
             } catch (Exception e) {
+                log.warn("UTF-8 scan failed for ZIP, retrying with GBK...");
                 try (ZipInputStream zisGbk = new ZipInputStream(file.getInputStream(), Charset.forName("GBK"))) {
                     scanAffectedSkills(zisGbk, affectedSkills);
                 }
@@ -105,10 +116,12 @@ public class SandboxService {
             try (ZipInputStream zis = new ZipInputStream(file.getInputStream(), StandardCharsets.UTF_8)) {
                 extractZip(zis, skillsDir);
             } catch (Exception e) {
+                log.warn("UTF-8 extract failed for ZIP, retrying with GBK...");
                 try (ZipInputStream zisGbk = new ZipInputStream(file.getInputStream(), Charset.forName("GBK"))) {
                     extractZip(zisGbk, skillsDir);
                 }
             }
+            log.info("Skill upload completed in {}ms", System.currentTimeMillis() - start);
         });
 
         StringBuilder sb = new StringBuilder("Upload successful. Details:\n");
@@ -123,10 +136,12 @@ public class SandboxService {
      * 1.2 获取技能描述列表
      */
     public List<SkillMetadata> getSkillList(String agentId) throws IOException {
+        log.info("Fetching skill list for agent: {}", agentId);
         Path skillsDir = getAgentRoot(agentId).resolve("skills");
         if (!Files.exists(skillsDir)) return Collections.emptyList();
 
         return storageService.readLocked(agentId, () -> {
+            long start = System.currentTimeMillis();
             List<SkillMetadata> metadataList = new ArrayList<>();
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(skillsDir)) {
                 for (Path entry : stream) {
@@ -135,6 +150,7 @@ public class SandboxService {
                     }
                 }
             }
+            log.info("Fetched {} skills in {}ms", metadataList.size(), System.currentTimeMillis() - start);
             return metadataList;
         });
     }
@@ -143,6 +159,7 @@ public class SandboxService {
      * 2.1 上传单一文件
      */
     public String uploadFile(String agentId, MultipartFile file) throws IOException {
+        log.info("Starting file upload for agent: {}, file: {}", agentId, file.getOriginalFilename());
         Path filesDir = getAgentRoot(agentId).resolve("files");
         String fileName = file.getOriginalFilename();
         Path targetPath = filesDir.resolve(fileName).normalize();
@@ -150,24 +167,34 @@ public class SandboxService {
         storageService.validateScope(targetPath, getAgentRoot(agentId));
         
         storageService.writeLockedVoid(agentId, () -> {
+            long start = System.currentTimeMillis();
             Files.createDirectories(filesDir);
             Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+            log.info("File upload completed in {}ms", System.currentTimeMillis() - start);
         });
         return "File uploaded successfully: files/" + fileName;
     }
 
     /**
-     * 2.2 列出目录清单
+     * 2.2 列出目录清单 (极致性能优化版)
      */
     public List<String> listFiles(String agentId, String logicalPrefix) throws IOException {
-        Path physicalRoot = resolveLogicalPath(agentId, logicalPrefix);
-        if (!Files.exists(physicalRoot)) throw new IOException("Path not found: " + logicalPrefix);
+        log.info("Listing files for agent: {}, prefix: {}", agentId, logicalPrefix);
+        final Path agentRoot = getAgentRoot(agentId);
+        final Path physicalRoot = resolveLogicalPath(agentId, logicalPrefix);
+        
+        if (!Files.exists(physicalRoot)) return Collections.emptyList();
 
         return storageService.readLocked(agentId, () -> {
-            try (Stream<Path> stream = Files.walk(physicalRoot)) {
-                return stream.filter(Files::isRegularFile)
-                        .map(file -> getAgentRoot(agentId).relativize(file).toString().replace('\\', '/'))
+            long start = System.currentTimeMillis();
+            // 使用 try-with-resources 确保 Stream 及时关闭，释放文件句柄
+            try (Stream<Path> stream = Files.walk(physicalRoot, 5)) { // 限制深度为 5 层，防止恶意超深目录导致 OOM
+                List<String> results = stream.parallel() // 并行处理路径转换
+                        .filter(Files::isRegularFile)
+                        .map(file -> agentRoot.relativize(file).toString().replace('\\', '/'))
                         .collect(Collectors.toList());
+                log.info("Listed {} files in {}ms", results.size(), System.currentTimeMillis() - start);
+                return results;
             }
         });
     }
@@ -176,10 +203,12 @@ public class SandboxService {
      * 2.3 读取文件内容
      */
     public FileContentResult getContent(String agentId, String logicalPath, Integer offset, Integer limit) throws IOException {
+        log.info("Fetching content for agent: {}, path: {}, offset: {}, limit: {}", agentId, logicalPath, offset, limit);
         Path physicalPath = resolveLogicalPath(agentId, logicalPath);
         if (!Files.exists(physicalPath)) throw new IOException("Path not found: " + logicalPath);
 
         return storageService.readLocked(agentId, () -> {
+            long start = System.currentTimeMillis();
             List<String> lines;
             try (Stream<String> lineStream = Files.lines(physicalPath, StandardCharsets.UTF_8)) {
                 if (offset != null && limit != null) {
@@ -191,6 +220,7 @@ public class SandboxService {
                 }
             }
             String content = String.join("\n", lines);
+            log.info("Fetched {} lines in {}ms", lines.size(), System.currentTimeMillis() - start);
             return new FileContentResult(content, lines);
         });
     }
@@ -229,32 +259,11 @@ public class SandboxService {
         if (!Files.exists(agentRoot)) Files.createDirectories(agentRoot);
 
         String commandLine = request.getCommand().trim();
-        boolean isWin = System.getProperty("os.name").toLowerCase().contains("win");
-
-        if (isWin) {
-            // Windows 使用 cmd /c 执行
-            return skillExecutor.executeInDir(agentRoot, "cmd", "/c", commandLine);
-        } else {
-            // Linux 使用 bash -c 执行
-            return skillExecutor.executeInDir(agentRoot, "bash", "-c", commandLine);
+        if (commandLine.isEmpty()) {
+            throw new RuntimeException("Command cannot be empty.");
         }
-    }
 
-    /**
-     * 健壮的命令行解析：支持处理双引号包裹的参数
-     */
-    private List<String> parseCommandLine(String commandLine) {
-        List<String> list = new ArrayList<>();
-        // 匹配非空白字符或双引号包裹的字符串
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("([^\"]\\S*|\".+?\")\\s*").matcher(commandLine);
-        while (m.find()) {
-            String token = m.group(1);
-            if (token.startsWith("\"") && token.endsWith("\"")) {
-                token = token.substring(1, token.length() - 1);
-            }
-            list.add(token);
-        }
-        return list;
+        return skillExecutor.executeInDir(agentRoot, commandLine);
     }
 
     // --- 内部辅助方法 ---

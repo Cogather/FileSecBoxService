@@ -16,7 +16,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  */
 @Service
 public class StorageService {
-
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(StorageService.class);
     private final Map<String, ReadWriteLock> locks = new ConcurrentHashMap<>();
 
     private ReadWriteLock getLock(String agentId) {
@@ -25,21 +25,39 @@ public class StorageService {
 
     public <T> T readLocked(String agentId, IOCallable<T> action) throws IOException {
         ReadWriteLock lock = getLock(agentId);
-        lock.readLock().lock();
         try {
-            return action.call();
-        } finally {
-            lock.readLock().unlock();
+            if (lock.readLock().tryLock(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                try {
+                    return action.call();
+                } finally {
+                    lock.readLock().unlock();
+                }
+            } else {
+                log.warn("Read lock timeout for agent: {}", agentId);
+                throw new IOException("Server busy: Read operation timed out. Please try again.");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Operation interrupted.");
         }
     }
 
     public void writeLockedVoid(String agentId, IOVoidAction action) throws IOException {
         ReadWriteLock lock = getLock(agentId);
-        lock.writeLock().lock();
         try {
-            action.run();
-        } finally {
-            lock.writeLock().unlock();
+            if (lock.writeLock().tryLock(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                try {
+                    action.run();
+                } finally {
+                    lock.writeLock().unlock();
+                }
+            } else {
+                log.warn("Write lock timeout for agent: {}", agentId);
+                throw new IOException("Server busy: Update operation timed out. Please try again.");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Operation interrupted.");
         }
     }
 

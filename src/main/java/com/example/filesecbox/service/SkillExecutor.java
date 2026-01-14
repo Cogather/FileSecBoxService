@@ -18,8 +18,11 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class SkillExecutor {
 
-    @Value("${app.product.root:/webIde/product}")
-    private String productRoot;
+    @Value("${app.product.root.win:D:/webIde/product}")
+    private String productRootWin;
+
+    @Value("${app.product.root.linux:/webIde/product}")
+    private String productRootLinux;
 
     // 开放的基础指令白名单 (对齐 DESIGN.md)
     private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(Arrays.asList(
@@ -29,33 +32,38 @@ public class SkillExecutor {
 
     private static final int TIMEOUT_SECONDS = 300; // 5分钟超时
 
-    public ExecutionResult executeInDir(Path workingDir, String command, String... args) throws Exception {
+    public ExecutionResult executeInDir(Path workingDir, String commandLine) throws Exception {
         boolean isWin = System.getProperty("os.name").toLowerCase().contains("win");
         Charset sysCharset = isWin ? Charset.forName("GBK") : StandardCharsets.UTF_8;
 
-        // 1. 指令白名单校验
-        if (!ALLOWED_COMMANDS.contains(command)) {
-            throw new RuntimeException("Security Error: Command '" + command + "' is not allowed in whitelist.");
+        // 1. 安全校验：禁止路径穿越
+        if (commandLine.contains("..")) {
+            throw new RuntimeException("Security Error: Path traversal '..' is strictly forbidden.");
         }
 
-        // 2. 参数深度校验
-        for (String arg : args) {
-            if (arg.contains("..")) {
-                throw new RuntimeException("Security Error: Path traversal '..' is strictly forbidden.");
-            }
-            validatePathSecurity(arg, workingDir, isWin);
+        // 2. 指令白名单校验：仅校验首个指令
+        String firstCmd = commandLine.trim().split("\\s+")[0];
+        if (firstCmd.startsWith("\"") && firstCmd.endsWith("\"")) {
+            firstCmd = firstCmd.substring(1, firstCmd.length() - 1);
+        }
+        if (!ALLOWED_COMMANDS.contains(firstCmd)) {
+            throw new RuntimeException("Security Error: Command '" + firstCmd + "' is not allowed.");
         }
 
-        // 3. 构建进程
+        // 3. 参数路径校验
+        validatePathSecurity(commandLine, workingDir, isWin);
+
+        // 4. 构建进程：通过 Shell 包装以支持 > | >> 等操作
         ProcessBuilder pb = new ProcessBuilder();
-        List<String> cmdList = new ArrayList<>();
-        cmdList.add(command);
-        cmdList.addAll(Arrays.asList(args));
-        pb.command(cmdList);
+        if (isWin) {
+            pb.command("cmd", "/c", commandLine);
+        } else {
+            pb.command("bash", "-c", commandLine);
+        }
         pb.directory(workingDir.toFile());
         pb.redirectErrorStream(false);
 
-        // 4. 环境净化 (Linux)
+        // 5. 环境净化 (Linux)
         Map<String, String> env = pb.environment();
         if (!isWin) {
             Set<String> safeEnvVars = new HashSet<>(Arrays.asList("PATH", "LANG", "LC_ALL", "HOME", "USER", "PWD"));
@@ -103,6 +111,7 @@ public class SkillExecutor {
     }
 
     private void validatePathSecurity(String arg, Path workingDir, boolean isWin) {
+        String productRoot = isWin ? productRootWin : productRootLinux;
         String normRoot = Paths.get(productRoot).toAbsolutePath().normalize().toString().replace("\\", "/").toLowerCase();
         String normArg = arg.replace("\\", "/").toLowerCase();
         

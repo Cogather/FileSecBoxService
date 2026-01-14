@@ -41,7 +41,8 @@ FileSecBoxService 是一个基于应用（Agent）维度隔离的安全沙箱服
 
 ### 3.3 安全执行引擎 (Execute)
 *   **工作目录**：必须锚定在逻辑路径对应的物理目录下。
-*   **指令白名单**：严格限制仅允许执行以下指令：`python`, `python3`, `bash`, `sh`, `ls`, `cat`, `echo`, `grep`, `sed`, `mkdir`, `touch`, `cp`, `mv`, `rm`, `tee`, `find`, `chmod`, `xargs`, `curl`。
+*   **Shell 包装**：系统自动通过 `bash -c` (Linux) 或 `cmd /c` (Windows) 包装指令，原生支持 `>`, `>>`, `|`, `&&` 等 Shell 操作符。
+*   **指令白名单**：严格限制仅允许执行以下指令作为首个指令：`python`, `python3`, `bash`, `sh`, `cmd`, `ls`, `cat`, `echo`, `grep`, `sed`, `mkdir`, `touch`, `cp`, `mv`, `rm`, `tee`, `find`, `chmod`, `xargs`, `curl`。
 *   **环境净化**：
     *   **Linux**：清理所有非安全环境变量，强制设置 `PATH=/usr/local/bin:/usr/bin:/bin`。
     *   **Windows**：识别盘符，统一路径分隔符为 `/`，适配系统字符编码。

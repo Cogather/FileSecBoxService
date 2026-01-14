@@ -10,6 +10,7 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/v1")
 public class SandboxController {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SandboxController.class);
 
     @Autowired
     private SandboxService sandboxService;
@@ -20,18 +21,22 @@ public class SandboxController {
     public ResponseEntity<ApiResponse<?>> uploadSkill(
             @PathVariable String agentId,
             @RequestParam("file") MultipartFile file) {
+        log.info("API CALL: uploadSkill, agentId: {}, filename: {}", agentId, file.getOriginalFilename());
         try {
             return ResponseEntity.ok(ApiResponse.success(sandboxService.uploadSkillReport(agentId, file)));
         } catch (Exception e) {
+            log.error("API ERROR: uploadSkill", e);
             return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
         }
     }
 
     @GetMapping("/skills/{agentId}/list")
     public ResponseEntity<ApiResponse<?>> getSkillList(@PathVariable String agentId) {
+        log.info("API CALL: getSkillList, agentId: {}", agentId);
         try {
             return ResponseEntity.ok(ApiResponse.success(sandboxService.getSkillList(agentId)));
         } catch (Exception e) {
+            log.error("API ERROR: getSkillList", e);
             return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
         }
     }
@@ -42,9 +47,11 @@ public class SandboxController {
     public ResponseEntity<ApiResponse<?>> uploadFile(
             @PathVariable String agentId,
             @RequestParam("file") MultipartFile file) {
+        log.info("API CALL: uploadFile, agentId: {}, filename: {}", agentId, file.getOriginalFilename());
         try {
             return ResponseEntity.ok(ApiResponse.success(sandboxService.uploadFile(agentId, file)));
         } catch (Exception e) {
+            log.error("API ERROR: uploadFile", e);
             return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
         }
     }
@@ -53,9 +60,11 @@ public class SandboxController {
     public ResponseEntity<ApiResponse<?>> listFiles(
             @PathVariable String agentId,
             @RequestParam("path") String path) {
+        log.info("API CALL: listFiles, agentId: {}, path: {}", agentId, path);
         try {
             return ResponseEntity.ok(ApiResponse.success(sandboxService.listFiles(agentId, path)));
         } catch (Exception e) {
+            log.error("API ERROR: listFiles", e);
             return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
         }
     }
@@ -66,9 +75,11 @@ public class SandboxController {
             @RequestParam("path") String path,
             @RequestParam(value = "offset", required = false) Integer offset,
             @RequestParam(value = "limit", required = false) Integer limit) {
+        log.info("API CALL: getContent, agentId: {}, path: {}, offset: {}, limit: {}", agentId, path, offset, limit);
         try {
             return ResponseEntity.ok(ApiResponse.success(sandboxService.getContent(agentId, path, offset, limit)));
         } catch (Exception e) {
+            log.error("API ERROR: getContent", e);
             return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
         }
     }
