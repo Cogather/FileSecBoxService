@@ -93,6 +93,10 @@ public class StorageService {
      * 精确编辑逻辑
      */
     public void preciseEdit(Path path, String oldStr, String newStr, int expected) throws IOException {
+        if (oldStr == null || oldStr.isEmpty()) {
+            throw new RuntimeException("Security Error: 'old_string' cannot be empty for replacement operation.");
+        }
+        
         String content = new String(Files.readAllBytes(path), java.nio.charset.StandardCharsets.UTF_8);
         
         // 计算匹配次数

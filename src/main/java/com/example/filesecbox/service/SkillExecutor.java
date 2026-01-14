@@ -50,7 +50,28 @@ public class SkillExecutor {
             throw new RuntimeException("Security Error: Command '" + firstCmd + "' is not allowed.");
         }
 
-        // 3. 参数路径校验
+        // 3. 强制路径前缀校验：命令中涉及的任何路径/文件名必须以 skills/ 或 files/ 开头
+        // 排除掉指令本身，对其后的参数进行扫描
+        String argsPart = commandLine.trim().substring(firstCmd.length()).trim();
+        if (!argsPart.isEmpty()) {
+            // 匹配潜在的文件路径模式
+            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("[\\w./-]+\\.[\\w]+|[\\w/-]+").matcher(argsPart);
+            while (matcher.find()) {
+                String potentialPath = matcher.group();
+                // 忽略纯数字、纯符号或过短的字符串
+                if (potentialPath.length() < 3 || potentialPath.matches("\\d+")) continue;
+                
+                // 核心规则：如果是路径，必须以 skills/ 或 files/ 开头
+                if (potentialPath.contains("/") || potentialPath.contains("\\") || potentialPath.contains(".")) {
+                    if (!potentialPath.startsWith("skills/") && !potentialPath.startsWith("files/") &&
+                        !potentialPath.equals("skills") && !potentialPath.equals("files")) {
+                        throw new RuntimeException("Security Error: Path '" + potentialPath + "' is out of operable scope. Must start with 'skills/' or 'files/'.");
+                    }
+                }
+            }
+        }
+
+        // 4. 参数路径校验（物理层）
         validatePathSecurity(commandLine, workingDir, isWin);
 
         // 4. 构建进程：通过 Shell 包装以支持 > | >> 等操作
