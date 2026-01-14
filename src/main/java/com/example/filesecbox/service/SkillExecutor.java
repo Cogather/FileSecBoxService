@@ -51,20 +51,22 @@ public class SkillExecutor {
         }
 
         // 3. 强制路径前缀校验：命令中涉及的任何路径/文件名必须以 skills/ 或 files/ 开头
-        // 排除掉指令本身，对其后的参数进行扫描
         String argsPart = commandLine.trim().substring(firstCmd.length()).trim();
         if (!argsPart.isEmpty()) {
-            // 匹配潜在的文件路径模式
-            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("[\\w./-]+\\.[\\w]+|[\\w/-]+").matcher(argsPart);
+            // 增强正则：支持中文、空格、引号包裹的路径解析
+            // 匹配模式：引号内的内容 OR 看起来像路径/文件名的连续字符（支持 Unicode）
+            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"([^\"]+)\"|([^\\s><|&]+)").matcher(argsPart);
             while (matcher.find()) {
-                String potentialPath = matcher.group();
-                // 忽略纯数字、纯符号或过短的字符串
-                if (potentialPath.length() < 3 || potentialPath.matches("\\d+")) continue;
+                String potentialPath = matcher.group(1) != null ? matcher.group(1) : matcher.group(2);
                 
-                // 核心规则：如果是路径，必须以 skills/ 或 files/ 开头
+                // 忽略纯数字（版本号）、短指令参数（如 -rf, --v）
+                if (potentialPath.length() < 3 || potentialPath.matches("^-+.*") || potentialPath.matches("^[\\d.]+$")) continue;
+                
+                // 如果片段包含路径分隔符或文件名后缀
                 if (potentialPath.contains("/") || potentialPath.contains("\\") || potentialPath.contains(".")) {
-                    if (!potentialPath.startsWith("skills/") && !potentialPath.startsWith("files/") &&
-                        !potentialPath.equals("skills") && !potentialPath.equals("files")) {
+                    String normalized = potentialPath.replace('\\', '/').toLowerCase();
+                    if (!normalized.startsWith("skills/") && !normalized.startsWith("files/") &&
+                        !normalized.equals("skills") && !normalized.equals("files")) {
                         throw new RuntimeException("Security Error: Path '" + potentialPath + "' is out of operable scope. Must start with 'skills/' or 'files/'.");
                     }
                 }
