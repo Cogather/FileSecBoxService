@@ -12,7 +12,6 @@ import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -46,7 +45,21 @@ public class SandboxService {
     }
 
     private Path getAgentRoot(String agentId) {
-        return productRoot.resolve(agentId).normalize();
+        Path agentRoot = productRoot.resolve(agentId).normalize();
+        ensureAgentDirs(agentRoot);
+        return agentRoot;
+    }
+
+    /**
+     * 确保 agent 下的 skills 和 files 目录默认创建好
+     */
+    private void ensureAgentDirs(Path agentRoot) {
+        try {
+            Files.createDirectories(agentRoot.resolve("skills"));
+            Files.createDirectories(agentRoot.resolve("files"));
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to initialize agent directories for: " + agentRoot, e);
+        }
     }
 
     /**
@@ -209,17 +222,39 @@ public class SandboxService {
 
     /**
      * 2.6 执行指令 (工作目录固定为应用根目录)
+     * 通过 Shell 包装以原生支持 >, >>, | 等重定向和管道符
      */
     public ExecutionResult execute(String agentId, CommandRequest request) throws Exception {
         Path agentRoot = getAgentRoot(agentId);
         if (!Files.exists(agentRoot)) Files.createDirectories(agentRoot);
 
         String commandLine = request.getCommand().trim();
-        String[] parts = commandLine.split("\\s+");
-        String cmd = parts[0];
-        String[] args = parts.length > 1 ? Arrays.copyOfRange(parts, 1, parts.length) : new String[0];
+        boolean isWin = System.getProperty("os.name").toLowerCase().contains("win");
 
-        return skillExecutor.executeInDir(agentRoot, cmd, args);
+        if (isWin) {
+            // Windows 使用 cmd /c 执行
+            return skillExecutor.executeInDir(agentRoot, "cmd", "/c", commandLine);
+        } else {
+            // Linux 使用 bash -c 执行
+            return skillExecutor.executeInDir(agentRoot, "bash", "-c", commandLine);
+        }
+    }
+
+    /**
+     * 健壮的命令行解析：支持处理双引号包裹的参数
+     */
+    private List<String> parseCommandLine(String commandLine) {
+        List<String> list = new ArrayList<>();
+        // 匹配非空白字符或双引号包裹的字符串
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("([^\"]\\S*|\".+?\")\\s*").matcher(commandLine);
+        while (m.find()) {
+            String token = m.group(1);
+            if (token.startsWith("\"") && token.endsWith("\"")) {
+                token = token.substring(1, token.length() - 1);
+            }
+            list.add(token);
+        }
+        return list;
     }
 
     // --- 内部辅助方法 ---

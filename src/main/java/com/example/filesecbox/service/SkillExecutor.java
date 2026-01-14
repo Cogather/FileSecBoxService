@@ -23,7 +23,7 @@ public class SkillExecutor {
 
     // 开放的基础指令白名单 (对齐 DESIGN.md)
     private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(Arrays.asList(
-            "python", "python3", "bash", "sh", "ls", "cat", "echo", "grep", "sed",
+            "python", "python3", "bash", "sh", "cmd", "ls", "cat", "echo", "grep", "sed",
             "mkdir", "touch", "cp", "mv", "rm", "tee", "find", "chmod", "xargs", "curl"
     ));
 
