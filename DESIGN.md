@@ -8,12 +8,15 @@ FileSecBoxService 是一个基于应用（Agent）维度隔离的安全沙箱服
 ## 2. 存储设计
 
 ### 2.1 物理目录布局
-所有应用数据均存储在统一的产品根目录下，实现应用间的物理隔离。
+所有应用数据均存储在统一的产品根目录下，实现应用间的物理隔离。系统在启动时会根据运行操作系统自动加载 `application.properties` 中对应的路径：
+
+*   **Windows 环境**：使用 `app.product.root.win` 配置（默认 `D:/webIde/product`）。
+*   **Linux/Docker 环境**：使用 `app.product.root.linux` 配置（默认 `/webIde/product`）。
 
 | 业务模块 | 逻辑路径前缀 | 物理存储路径 | 存放内容枚举 |
 | :--- | :--- | :--- | :--- |
-| **技能模块** | `skills/` | `/webIde/product/{agentId}/skills/` | 技能元数据（SKILL.md）、业务 Python 脚本、技能私有配置。 |
-| **通用文件模块** | `files/` | `/webIde/product/{agentId}/files/` | 统一的沙箱文件处理代码、公共环境配置、工具类脚本。 |
+| **技能模块** | `skills/` | `${app.product.root}/{agentId}/skills/` | 技能元数据（SKILL.md）、业务 Python 脚本、技能私有配置。 |
+| **通用文件模块** | `files/` | `${app.product.root}/{agentId}/files/` | 统一的沙箱文件处理代码、公共环境配置、工具类脚本。 |
 
 ### 2.2 路径校验准则
 *   **前缀强制性**：所有 I/O 接口接收的路径参数（`path` 或 `file_path`）必须且只能以 `skills/` 或 `files/` 作为起始字符串。

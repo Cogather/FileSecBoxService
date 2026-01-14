@@ -22,8 +22,11 @@ import java.util.zip.ZipInputStream;
 @Service
 public class SandboxService {
 
-    @Value("${app.product.root:/webIde/product}")
-    private String productRootPath;
+    @Value("${app.product.root.win:D:/webIde/product}")
+    private String productRootWin;
+
+    @Value("${app.product.root.linux:/webIde/product}")
+    private String productRootLinux;
 
     private Path productRoot;
 
@@ -35,7 +38,10 @@ public class SandboxService {
 
     @PostConstruct
     public void init() throws IOException {
-        this.productRoot = Paths.get(productRootPath).toAbsolutePath().normalize();
+        String os = System.getProperty("os.name").toLowerCase();
+        String finalPath = os.contains("win") ? productRootWin : productRootLinux;
+        
+        this.productRoot = Paths.get(finalPath).toAbsolutePath().normalize();
         Files.createDirectories(productRoot);
     }
 
