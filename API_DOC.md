@@ -44,6 +44,23 @@
     }
     ```
 
+### 1.3 删除技能
+*   **功能**: 删除指定应用的某个技能及其下属的所有文件。
+*   **URL**: `DELETE /v1/skills/{agentId}/delete`
+*   **参数**: 
+    *   `name` (Query): 技能名称（对应文件夹名）。
+*   **示例**:
+    ```bash
+    curl -X DELETE "$BASE_URL/v1/skills/agent001/delete?name=weather"
+    ```
+*   **输出**:
+    ```json
+    {
+      "status": "success",
+      "data": "Successfully deleted skill: weather"
+    }
+    ```
+
 ---
 
 ## 2. 文件与执行管理 (Sandbox)
@@ -167,6 +184,23 @@
         "stderror": "",
         "exit_code": 0
       }
+    }
+    ```
+
+### 2.7 删除指定文件
+*   **功能**: 删除指定的单个文件或空目录。
+*   **URL**: `DELETE /v1/{agentId}/delete`
+*   **参数**: 
+    *   `path` (Query): 文件的逻辑路径（必须以 `skills/` 或 `files/` 开头）。
+*   **示例**:
+    ```bash
+    curl -X DELETE "$BASE_URL/v1/agent001/delete?path=files/test_echo.txt"
+    ```
+*   **输出**:
+    ```json
+    {
+      "status": "success",
+      "data": "Successfully deleted path: files/test_echo.txt"
     }
     ```
 

@@ -41,6 +41,19 @@ public class SandboxController {
         }
     }
 
+    @DeleteMapping("/skills/{agentId}/delete")
+    public ResponseEntity<ApiResponse<?>> deleteSkill(
+            @PathVariable String agentId,
+            @RequestParam("name") String name) {
+        log.info("API CALL: deleteSkill, agentId: {}, skillName: {}", agentId, name);
+        try {
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.deleteSkill(agentId, name)));
+        } catch (Exception e) {
+            log.error("API ERROR: deleteSkill", e);
+            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
     // --- 2. 文件与执行管理 ---
 
     @PostMapping("/files/{agentId}/upload")
@@ -114,6 +127,19 @@ public class SandboxController {
             ExecutionResult result = sandboxService.execute(agentId, request);
             return ResponseEntity.ok(ApiResponse.success(result));
         } catch (Exception e) {
+            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    @DeleteMapping("/{agentId}/delete")
+    public ResponseEntity<ApiResponse<?>> deleteFile(
+            @PathVariable String agentId,
+            @RequestParam("path") String path) {
+        log.info("API CALL: deleteFile, agentId: {}, path: {}", agentId, path);
+        try {
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.deleteFile(agentId, path)));
+        } catch (Exception e) {
+            log.error("API ERROR: deleteFile", e);
             return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
         }
     }

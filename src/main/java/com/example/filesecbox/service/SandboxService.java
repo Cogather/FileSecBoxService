@@ -156,6 +156,27 @@ public class SandboxService {
     }
 
     /**
+     * 1.3 删除技能
+     */
+    public String deleteSkill(String agentId, String skillName) throws IOException {
+        log.info("Deleting skill for agent: {}, skillName: {}", agentId, skillName);
+        if (skillName == null || skillName.trim().isEmpty()) {
+            throw new RuntimeException("Skill name cannot be empty.");
+        }
+        Path skillPath = getAgentRoot(agentId).resolve("skills").resolve(skillName).normalize();
+        storageService.validateScope(skillPath, getAgentRoot(agentId).resolve("skills"));
+
+        storageService.writeLockedVoid(agentId, () -> {
+            if (!Files.exists(skillPath)) {
+                throw new IOException("Skill not found: " + skillName);
+            }
+            storageService.deleteRecursively(skillPath);
+            log.info("Successfully deleted skill: {}", skillName);
+        });
+        return "Successfully deleted skill: " + skillName;
+    }
+
+    /**
      * 2.1 上传单一文件
      */
     public String uploadFile(String agentId, MultipartFile file) throws IOException {
@@ -264,6 +285,23 @@ public class SandboxService {
         }
 
         return skillExecutor.executeInDir(agentRoot, commandLine);
+    }
+
+    /**
+     * 2.7 删除指定文件
+     */
+    public String deleteFile(String agentId, String logicalPath) throws IOException {
+        log.info("Deleting file for agent: {}, path: {}", agentId, logicalPath);
+        Path physicalPath = resolveLogicalPath(agentId, logicalPath);
+
+        storageService.writeLockedVoid(agentId, () -> {
+            if (!Files.exists(physicalPath)) {
+                throw new IOException("Path not found: " + logicalPath);
+            }
+            storageService.deleteRecursively(physicalPath);
+            log.info("Successfully deleted path: {}", logicalPath);
+        });
+        return "Successfully deleted path: " + logicalPath;
     }
 
     // --- 内部辅助方法 ---
