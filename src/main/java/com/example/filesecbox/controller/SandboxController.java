@@ -127,6 +127,7 @@ public class SandboxController {
             ExecutionResult result = sandboxService.execute(agentId, request);
             return ResponseEntity.ok(ApiResponse.success(result));
         } catch (Exception e) {
+            log.error("API ERROR: execute", e);
             return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
         }
     }
