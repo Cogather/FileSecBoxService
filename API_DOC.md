@@ -257,3 +257,13 @@
       "data": "Execution Timeout: Process killed after 300 seconds."
     }
     ```
+
+### 3.6 技能包校验失败
+*   **场景**: 上传的 ZIP 包中某个技能目录缺少必须的 `SKILL.md` 文件。
+*   **输出**:
+    ```json
+    {
+      "status": "error",
+      "data": "Validation Error: Skill [weather] is missing required 'SKILL.md' file."
+    }
+    ```

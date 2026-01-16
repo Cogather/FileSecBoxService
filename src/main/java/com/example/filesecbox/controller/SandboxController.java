@@ -26,7 +26,8 @@ public class SandboxController {
             return ResponseEntity.ok(ApiResponse.success(sandboxService.uploadSkillReport(agentId, file)));
         } catch (Exception e) {
             log.error("API ERROR: uploadSkill", e);
-            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+            // 业务校验失败返回 200 OK，但状态为 error
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
@@ -37,7 +38,7 @@ public class SandboxController {
             return ResponseEntity.ok(ApiResponse.success(sandboxService.getSkillList(agentId)));
         } catch (Exception e) {
             log.error("API ERROR: getSkillList", e);
-            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
@@ -50,7 +51,7 @@ public class SandboxController {
             return ResponseEntity.ok(ApiResponse.success(sandboxService.deleteSkill(agentId, name)));
         } catch (Exception e) {
             log.error("API ERROR: deleteSkill", e);
-            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
@@ -65,7 +66,7 @@ public class SandboxController {
             return ResponseEntity.ok(ApiResponse.success(sandboxService.uploadFile(agentId, file)));
         } catch (Exception e) {
             log.error("API ERROR: uploadFile", e);
-            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
@@ -78,7 +79,7 @@ public class SandboxController {
             return ResponseEntity.ok(ApiResponse.success(sandboxService.listFiles(agentId, path)));
         } catch (Exception e) {
             log.error("API ERROR: listFiles", e);
-            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
@@ -93,7 +94,7 @@ public class SandboxController {
             return ResponseEntity.ok(ApiResponse.success(sandboxService.getContent(agentId, path, offset, limit)));
         } catch (Exception e) {
             log.error("API ERROR: getContent", e);
-            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
@@ -104,7 +105,8 @@ public class SandboxController {
         try {
             return ResponseEntity.ok(ApiResponse.success(sandboxService.write(agentId, request)));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+            log.error("API ERROR: write", e);
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
@@ -115,7 +117,8 @@ public class SandboxController {
         try {
             return ResponseEntity.ok(ApiResponse.success(sandboxService.edit(agentId, request)));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+            log.error("API ERROR: edit", e);
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
@@ -128,7 +131,7 @@ public class SandboxController {
             return ResponseEntity.ok(ApiResponse.success(result));
         } catch (Exception e) {
             log.error("API ERROR: execute", e);
-            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
@@ -141,7 +144,7 @@ public class SandboxController {
             return ResponseEntity.ok(ApiResponse.success(sandboxService.deleteFile(agentId, path)));
         } catch (Exception e) {
             log.error("API ERROR: deleteFile", e);
-            return ResponseEntity.status(500).body(ApiResponse.error(e.getMessage()));
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 }
