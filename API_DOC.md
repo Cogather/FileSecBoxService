@@ -26,7 +26,10 @@
     ```
 
 ### 1.2 查询技能清单
-*   **功能**: 返回该应用下所有已安装技能的名称及描述（仅识别在技能根目录下包含 `SKILL.md` 的技能）。
+*   **功能**: 返回该应用下所有已安装技能的名称及描述。
+*   **自愈机制**: 
+    *   如果系统检测到 `SKILL.md` 处于非法深度（如 `skills/A/sub/SKILL.md`），系统会将其向上移动到一级目录根部（`skills/A/SKILL.md`）。
+    *   **注意**：系统仅移动 `SKILL.md` 文件，文件夹 `sub/` 及其中的其他文件将保持不动。
 *   **URL**: `GET /v1/skills/{agentId}/list`
 *   **示例**:
     ```bash
@@ -269,12 +272,17 @@
     }
     ```
 
-### 3.7 SKILL.md 位置非法
-*   **场景**: 通过 `write` 或 `edit` API 在非技能根目录位置创建或编辑 `SKILL.md`。
+### 3.7 技能位置自动调整
+*   **场景**: 某个技能脚本内部执行了创建新技能的操作，但错误地将路径设为了 `skills/old_skill/new_skill/`。
+*   **处理**: 用户调用 `list` 接口后，系统会自动检测并执行移动操作。后台日志会记录：`Detected nested skill at skills/old_skill/new_skill, auto-adjusting to skills/new_skill`。
+
+### 3.8 SKILL.md 位置非法
+*   **场景**: 通过 `write`、`edit` 或 `execute` API 在非技能根目录位置创建或操作 `SKILL.md`。
 *   **输出**:
     ```json
     {
       "status": "error",
-      "data": "Validation Error: 'SKILL.md' placement must follow the pattern 'skills/{skill_name}/SKILL.md'."
+      "data": "Security Error: 'SKILL.md' is a system reserved file. You can only create/edit it at the root of a skill (e.g., skills/my_skill/SKILL.md)."
     }
     ```
+

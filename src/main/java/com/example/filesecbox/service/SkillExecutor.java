@@ -65,6 +65,16 @@ public class SkillExecutor {
                 // 如果片段包含路径分隔符或文件名后缀
                 if (potentialPath.contains("/") || potentialPath.contains("\\") || potentialPath.contains(".")) {
                     String normalized = potentialPath.replace('\\', '/').toLowerCase();
+                    
+                    // --- 新增：SKILL.md 深度拦截逻辑 ---
+                    if (normalized.endsWith("/skill.md") || normalized.equals("skill.md")) {
+                        String[] parts = normalized.split("/");
+                        // 必须是 skills/{name}/SKILL.md 格式，长度为 3
+                        if (!normalized.startsWith("skills/") || parts.length != 3) {
+                            throw new RuntimeException("Security Error: 'SKILL.md' is a system reserved file. You can only create/edit it at the root of a skill (e.g., skills/my_skill/SKILL.md).");
+                        }
+                    }
+
                     if (!normalized.startsWith("skills/") && !normalized.startsWith("files/") &&
                         !normalized.equals("skills") && !normalized.equals("files")) {
                         throw new RuntimeException("Security Error: Path '" + potentialPath + "' is out of operable scope. Must start with 'skills/' or 'files/'.");

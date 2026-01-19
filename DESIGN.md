@@ -43,14 +43,21 @@ FileSecBoxService 是一个基于应用（Agent）维度隔离的安全沙箱服
 
 ### 3.2 技能生命周期
 *   **上传 (Upload)**：接收 ZIP 压缩包，解压至该应用的技能物理目录。支持 `UTF-8` 和 `GBK` 双编码兼容处理。
-    *   **合法性校验**：每个技能必须在根目录下包含 `SKILL.md`（即 `zip根目录/技能名/SKILL.md`）。
-*   **查询 (List)**：仅返回包含合法根目录 `SKILL.md` 的文件夹。
+    *   **合法性校验**：每个技能必须在其根目录下包含 `SKILL.md`。
+*   **加载与自愈 (Load & Auto-Healing)**：
+    *   **自动向上提取**：在 `list` 接口被调用时，系统会扫描 `skills/` 下的所有一级目录。
+    *   **调整逻辑**：如果在一级目录的子文件夹中发现了 `SKILL.md`（如 `skills/A/B/SKILL.md`），系统会自动将其移动到该一级目录的根部（即 `skills/A/SKILL.md`）。
+    *   **非侵入性**：仅移动 `SKILL.md` 文件本身。其余代码文件、子目录（如 `B/` 下的脚本）保持原位不动，以避免破坏脚本内部的相对路径引用。
+    *   **目的**：确保每个一级目录文件夹都能通过其根部的 `SKILL.md` 被识别为合法技能，修复因嵌套创建导致的身份缺失。
+*   **查询 (List)**：仅返回已完成自愈、且在合法一级目录下拥有 `SKILL.md` 的技能。
 *   **解析**：自动扫描并解析 `SKILL.md`，提取 `name` 和 `description` 字段。
 
 ### 3.3 安全执行引擎 (Execute)
 *   **工作目录**：必须锚定在逻辑路径对应的物理目录下。
 *   **Shell 包装**：系统自动通过 `bash -c` (Linux) 或 `cmd /c` (Windows) 包装指令，原生支持 `>`, `>>`, `|`, `&&` 等 Shell 操作符。
 *   **指令白名单**：严格限制仅允许执行以下指令作为首个指令：`python`, `python3`, `bash`, `sh`, `cmd`, `ls`, `cat`, `echo`, `grep`, `sed`, `mkdir`, `touch`, `cp`, `mv`, `rm`, `tee`, `find`, `chmod`, `xargs`, `curl`。
+*   **SKILL.md 深度防御策略**：
+    *   **事前拦截**：若命令行中出现 `SKILL.md` 字样，系统会强制检查其路径。如果不是 `skills/{name}/SKILL.md` 格式（例如试图在子目录或根目录下操作），则拒绝执行并返回：“Security Error: 'SKILL.md' is a system reserved file. You can only create/edit it at the root of a skill (e.g., skills/my_skill/SKILL.md).”
 *   **环境净化**：
     *   **Linux**：清理所有非安全环境变量，强制设置 `PATH=/usr/local/bin:/usr/bin:/bin`。
     *   **Windows**：识别盘符，统一路径分隔符为 `/`，适配系统字符编码。
