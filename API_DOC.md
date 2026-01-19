@@ -27,9 +27,9 @@
 
 ### 1.2 查询技能清单
 *   **功能**: 返回该应用下所有已安装技能的名称及描述。
-*   **自愈机制**: 
-    *   如果系统检测到 `SKILL.md` 处于非法深度（如 `skills/A/sub/SKILL.md`），系统会将其向上移动到一级目录根部（`skills/A/SKILL.md`）。
-    *   **注意**：系统仅移动 `SKILL.md` 文件，文件夹 `sub/` 及其中的其他文件将保持不动。
+*   **冗余层压缩**: 
+    *   如果系统检测到技能目录下存在冗余的单一子目录（如 `skills/A/A/SKILL.md`），系统会自动将其“剥离”，将内容提升到一级目录根部。
+    *   **触发场景**：该逻辑在 `list` 接口调用及 `execute` 接口（涉及技能路径时）执行后自动触发。
 *   **URL**: `GET /v1/skills/{agentId}/list`
 *   **示例**:
     ```bash
@@ -272,9 +272,9 @@
     }
     ```
 
-### 3.7 技能位置自动调整
-*   **场景**: 某个技能脚本内部执行了创建新技能的操作，但错误地将路径设为了 `skills/old_skill/new_skill/`。
-*   **处理**: 用户调用 `list` 接口后，系统会自动检测并执行移动操作。后台日志会记录：`Detected nested skill at skills/old_skill/new_skill, auto-adjusting to skills/new_skill`。
+### 3.7 冗余结构压缩
+*   **场景**: 某个技能脚本内部执行了创建操作，由于路径拼接错误导致出现了 `skills/my_skill/my_skill/main.py` 这种冗余层。
+*   **处理**: 用户调用 `list` 或该命令执行完毕后，系统会自动检测并打平目录。后台日志会记录：`Detected redundant wrapper directory at ..., flattening...`。
 
 ### 3.8 SKILL.md 位置非法
 *   **场景**: 通过 `write`、`edit` 或 `execute` API 在非技能根目录位置创建或操作 `SKILL.md`。
