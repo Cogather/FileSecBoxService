@@ -65,6 +65,17 @@
     }
     ```
 
+### 1.4 下载技能包
+*   **功能**: 将指定的技能目录打包为 ZIP 文件并下载。
+*   **URL**: `GET /v1/skills/{agentId}/download`
+*   **参数**: 
+    *   `name` (Query): 技能名称。
+*   **示例**:
+    ```bash
+    curl -o weather_backup.zip "$BASE_URL/v1/skills/agent001/download?name=weather"
+    ```
+*   **响应**: 返回 ZIP 二进制流。
+
 ---
 
 ## 2. 文件与执行管理 (Sandbox)

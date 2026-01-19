@@ -55,6 +55,24 @@ public class SandboxController {
         }
     }
 
+    @GetMapping("/skills/{agentId}/download")
+    public void downloadSkill(
+            @PathVariable String agentId,
+            @RequestParam("name") String name,
+            javax.servlet.http.HttpServletResponse response) {
+        log.info("API CALL: downloadSkill, agentId: {}, skillName: {}", agentId, name);
+        try {
+            response.setContentType("application/zip");
+            response.setHeader("Content-Disposition", "attachment; filename=" + name + ".zip");
+            sandboxService.downloadSkill(agentId, name, response.getOutputStream());
+        } catch (Exception e) {
+            log.error("API ERROR: downloadSkill", e);
+            try {
+                response.sendError(500, e.getMessage());
+            } catch (Exception ignored) {}
+        }
+    }
+
     // --- 2. 文件与执行管理 ---
 
     @PostMapping("/files/{agentId}/upload")
