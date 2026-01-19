@@ -22,13 +22,16 @@ FileSecBoxService 是一个基于应用（Agent）维度隔离的安全沙箱服
 *   **前缀强制性**：所有 I/O 接口接收的路径参数（`path` 或 `file_path`）必须且只能以 `skills/` 或 `files/` 作为起始字符串。
 *   **归一化校验**：系统在操作前必须对路径进行 `normalize` 处理，防止通过 `../` 进行路径穿越。
 *   **锚定校验**：物理路径通过 `productRoot.resolve(agentId).resolve(logicalPath)` 计算得到。系统必须校验最终物理路径是否位于 `/webIde/product/{agentId}/` 范围内。
+*   **SKILL.md 写入限制**：
+    *   在 `skills/` 目录下写入名为 `SKILL.md` 的文件时，路径必须严格遵循 `skills/{skill_name}/SKILL.md` 格式。
+    *   禁止在技能子目录下或 `skills/` 根目录下直接创建 `SKILL.md`。
 
 ---
 
 ## 3. 核心功能设计
 
 ### 3.1 文件管理逻辑
-*   **全量写入 (Write)**：直接在目标物理路径创建或覆盖文件。
+*   **全量写入 (Write)**：直接在目标物理路径创建或覆盖文件。系统需拦截非法的 `SKILL.md` 路径。
 *   **分页读取 (Content)**：支持通过 `offset`（起始行号，从 1 开始）和 `limit`（读取行数）参数进行行级分页读取，减少内存负载。
 *   **精确编辑 (Edit)**：
     *   **匹配机制**：系统读取文件后，寻找 `old_string` 的位置。
@@ -40,6 +43,8 @@ FileSecBoxService 是一个基于应用（Agent）维度隔离的安全沙箱服
 
 ### 3.2 技能生命周期
 *   **上传 (Upload)**：接收 ZIP 压缩包，解压至该应用的技能物理目录。支持 `UTF-8` 和 `GBK` 双编码兼容处理。
+    *   **合法性校验**：每个技能必须在根目录下包含 `SKILL.md`（即 `zip根目录/技能名/SKILL.md`）。
+*   **查询 (List)**：仅返回包含合法根目录 `SKILL.md` 的文件夹。
 *   **解析**：自动扫描并解析 `SKILL.md`，提取 `name` 和 `description` 字段。
 
 ### 3.3 安全执行引擎 (Execute)

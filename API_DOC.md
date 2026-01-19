@@ -9,6 +9,7 @@
 
 ### 1.1 上传并解压技能
 *   **功能**: 将 ZIP 格式的技能包上传并解压到该应用的技能目录中。
+*   **校验**: 压缩包内的每个技能必须在其根目录下直接包含 `SKILL.md`（例如 `skill_a/SKILL.md`）。
 *   **URL**: `POST /v1/skills/{agentId}/upload`
 *   **输入**: 
     *   `file` (Multipart): ZIP 压缩文件。
@@ -25,7 +26,7 @@
     ```
 
 ### 1.2 查询技能清单
-*   **功能**: 返回该应用下所有已安装技能的名称及描述（解析自 `SKILL.md`）。
+*   **功能**: 返回该应用下所有已安装技能的名称及描述（仅识别在技能根目录下包含 `SKILL.md` 的技能）。
 *   **URL**: `GET /v1/skills/{agentId}/list`
 *   **示例**:
     ```bash
@@ -259,11 +260,21 @@
     ```
 
 ### 3.6 技能包校验失败
-*   **场景**: 上传的 ZIP 包中某个技能目录缺少必须的 `SKILL.md` 文件。
+*   **场景**: 上传的 ZIP 包中某个技能目录根路径下缺少 `SKILL.md` 文件。
 *   **输出**:
     ```json
     {
       "status": "error",
-      "data": "Validation Error: Skill [weather] is missing required 'SKILL.md' file."
+      "data": "Validation Error: Skill [weather] is missing required 'SKILL.md' at its root."
+    }
+    ```
+
+### 3.7 SKILL.md 位置非法
+*   **场景**: 通过 `write` 或 `edit` API 在非技能根目录位置创建或编辑 `SKILL.md`。
+*   **输出**:
+    ```json
+    {
+      "status": "error",
+      "data": "Validation Error: 'SKILL.md' placement must follow the pattern 'skills/{skill_name}/SKILL.md'."
     }
     ```
