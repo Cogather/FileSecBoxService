@@ -105,6 +105,17 @@
     }
     ```
 
+### 1.7 远程下载并安装技能
+*   **功能**: 从指定的远程 URL 下载 ZIP 格式的技能包并解压安装。
+*   **URL**: `POST /v1/skills/{agentId}/download-url`
+*   **参数**: 
+    *   `url` (Query): 技能包的公开下载地址。
+*   **示例**:
+    ```bash
+    curl -X POST "$BASE_URL/v1/skills/agent001/download-url?url=https://example.com/skills/weather.zip"
+    ```
+*   **输出**: 返回详细的安装成功信息（包含技能名及注册状态）。
+
 ---
 
 ## 2. 文件与执行管理 (Sandbox)

@@ -97,6 +97,19 @@ public class SandboxController {
         }
     }
 
+    @PostMapping("/skills/{agentId}/download-url")
+    public ResponseEntity<ApiResponse<?>> downloadSkillFromUrl(
+            @PathVariable String agentId,
+            @RequestParam("url") String url) {
+        log.info("API CALL: downloadSkillFromUrl, agentId: {}, url: {}", agentId, url);
+        try {
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.downloadSkillFromUrl(agentId, url)));
+        } catch (Exception e) {
+            log.error("API ERROR: downloadSkillFromUrl", e);
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
+        }
+    }
+
     // --- 2. 文件与执行管理 ---
 
     @PostMapping("/files/{agentId}/upload")
