@@ -104,32 +104,6 @@ public class SandboxService {
     }
 
     /**
-     * 1.7 远程下载并安装技能
-     */
-    public String downloadSkillFromUrl(String agentId, String url) throws IOException {
-        log.info("Downloading skill from URL: {} for agent: {}", url, agentId);
-        if (!url.startsWith("http")) {
-            throw new RuntimeException("Security Error: Only HTTP/HTTPS URLs are allowed.");
-        }
-
-        java.net.URL targetUrl = new java.net.URL(url);
-        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) targetUrl.openConnection();
-        conn.setConnectTimeout(10000);
-        conn.setReadTimeout(30000);
-        
-        int status = conn.getResponseCode();
-        if (status != 200) {
-            throw new IOException("Failed to download skill package. HTTP Status: " + status);
-        }
-
-        try (java.io.InputStream is = conn.getInputStream()) {
-            return installSkillFromStream(agentId, is, url);
-        } finally {
-            conn.disconnect();
-        }
-    }
-
-    /**
      * 核心技能安装流水线 (通用于上传和远程下载)
      */
     private String installSkillFromStream(String agentId, java.io.InputStream is, String source) throws IOException {
@@ -312,9 +286,9 @@ public class SandboxService {
     }
 
     /**
-     * 1.7 远程下载并安装技能
+     * 内部辅助：远程下载并安装技能 (仅供官方工具安装使用)
      */
-    public String downloadSkillFromUrl(String agentId, String url) throws IOException {
+    private String downloadSkillFromUrl(String agentId, String url) throws IOException {
         log.info("Downloading skill from URL: {} for agent: {}", url, agentId);
         if (url == null || !url.startsWith("http")) {
             throw new RuntimeException("Security Error: Only HTTP/HTTPS URLs are allowed.");

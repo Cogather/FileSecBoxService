@@ -105,20 +105,10 @@
     }
     ```
 
-### 1.7 远程下载并安装技能
-*   **功能**: 从指定的远程 URL 下载 ZIP 格式的技能包并解压安装。
-*   **URL**: `POST /v1/skills/{agentId}/download-url`
-*   **参数**: 
-    *   `url` (Query): 技能包的公开下载地址。
-*   **示例**:
-    ```bash
-    curl -X POST "$BASE_URL/v1/skills/agent001/download-url?url=https://example.com/skills/weather.zip"
-    ```
-*   **输出**: 返回详细的安装成功信息（包含技能名及注册状态）。
-
-### 1.8 安装官方工具包 (Skill Creator)
-*   **功能**: 从配置文件 `app.skill.creator.url` 指定的地址下载并安装官方工具。
+### 1.7 安装官方工具包 (Skill Creator)
+*   **功能**: 从配置文件 `app.skill.creator.url` 指定的地址自动下载并安装官方工具。
 *   **URL**: `POST /v1/skills/{agentId}/install-creator`
+*   **参数**: 无（自动取用服务端配置）。
 *   **示例**:
     ```bash
     curl -X POST "$BASE_URL/v1/skills/agent001/install-creator"
