@@ -142,7 +142,10 @@ public class SandboxService {
                     extractZip(zisGbk, skillsDir);
                 }
             }
-            log.info("Skill upload completed in {}ms", System.currentTimeMillis() - start);
+
+            // 5. 将官方上传的技能加入身份清单 (.manifest)
+            addToManifest(skillsDir, affectedSkills);
+            log.info("Skill upload and manifest registration completed in {}ms", System.currentTimeMillis() - start);
         });
 
         StringBuilder sb = new StringBuilder("Upload successful. Details:\n");
@@ -154,7 +157,7 @@ public class SandboxService {
     }
 
     /**
-     * 1.2 获取技能描述列表 (支持冗余层级压缩)
+     * 1.2 获取技能描述列表 (基于身份清单 .manifest)
      */
     public List<SkillMetadata> getSkillList(String agentId) throws IOException {
         log.info("Fetching skill list for agent: {}", agentId);
@@ -165,24 +168,39 @@ public class SandboxService {
         return storageService.writeLocked(agentId, () -> {
             long start = System.currentTimeMillis();
             
-            // 1. 冗余层级压缩处理：平铺嵌套结构 A/B/* -> A/*
-            try (DirectoryStream<Path> stream = Files.newDirectoryStream(skillsDir)) {
-                for (Path entry : stream) {
-                    if (Files.isDirectory(entry)) {
-                        autoFlattenWrapper(entry);
+            // 1. 读取身份清单
+            Set<String> manifest = getManifest(skillsDir);
+            if (manifest.isEmpty()) return Collections.emptyList();
+
+            // 2. 遍历清单并校验物理存在性 (实现自愈)
+            List<SkillMetadata> metadataList = new ArrayList<>();
+            boolean manifestChanged = false;
+            Iterator<String> it = manifest.iterator();
+            while (it.hasNext()) {
+                String skillName = it.next();
+                Path skillPath = skillsDir.resolve(skillName);
+                
+                if (Files.isDirectory(skillPath)) {
+                    // 冗余层级压缩处理：平铺嵌套结构 A/B/* -> A/*
+                    autoFlattenWrapper(skillPath);
+                    
+                    // 最终校验根目录下必须有 SKILL.md 才算合法
+                    if (Files.exists(skillPath.resolve("SKILL.md"))) {
+                        metadataList.add(parseSkillMd(skillPath));
                     }
+                } else {
+                    // 物理不存在，从清单中移除 (自愈)
+                    log.info("Manifest Self-Healing: Removing missing skill [{}] from manifest", skillName);
+                    it.remove();
+                    manifestChanged = true;
                 }
             }
 
-            // 2. 获取压缩后的合法列表 (根目录下必须有 SKILL.md)
-            List<SkillMetadata> metadataList = new ArrayList<>();
-            try (DirectoryStream<Path> stream = Files.newDirectoryStream(skillsDir)) {
-                for (Path entry : stream) {
-                    if (Files.isDirectory(entry) && Files.exists(entry.resolve("SKILL.md"))) {
-                        metadataList.add(parseSkillMd(entry));
-                    }
-                }
+            // 3. 如果清单发生了变动，保存更新
+            if (manifestChanged) {
+                saveManifest(skillsDir, manifest);
             }
+
             log.info("Fetched and processed skill list in {}ms", System.currentTimeMillis() - start);
             return metadataList;
         });
@@ -213,10 +231,27 @@ public class SandboxService {
     }
 
     /**
-     * 1.3 删除技能
+     * 1.3 删除技能 (同步更新清单)
      */
     public String deleteSkill(String agentId, String skillName) throws IOException {
-// ... (原有代码保持不变)
+        log.info("Deleting skill for agent: {}, skillName: {}", agentId, skillName);
+        if (skillName == null || skillName.trim().isEmpty()) {
+            throw new RuntimeException("Skill name cannot be empty.");
+        }
+        Path skillsDir = getAgentRoot(agentId).resolve("skills");
+        Path skillPath = skillsDir.resolve(skillName).normalize();
+        storageService.validateScope(skillPath, skillsDir);
+
+        storageService.writeLockedVoid(agentId, () -> {
+            if (!Files.exists(skillPath)) {
+                throw new IOException("Skill not found: " + skillName);
+            }
+            storageService.deleteRecursively(skillPath);
+            // 同步从清单中移除
+            removeFromManifest(skillsDir, skillName);
+            log.info("Successfully deleted skill and updated manifest: {}", skillName);
+        });
+        return "Successfully deleted skill: " + skillName;
     }
 
     /**
@@ -240,6 +275,57 @@ public class SandboxService {
             }
             return null;
         });
+    }
+
+    /**
+     * 1.5 获取非清单技能列表
+     */
+    public List<SkillMetadata> getUnlistedSkillList(String agentId) throws IOException {
+        log.info("Fetching unlisted skill list for agent: {}", agentId);
+        Path agentRoot = getAgentRoot(agentId);
+        Path skillsDir = agentRoot.resolve("skills");
+        if (!Files.exists(skillsDir)) return Collections.emptyList();
+
+        return storageService.readLocked(agentId, () -> {
+            Set<String> manifest = getManifest(skillsDir);
+            List<SkillMetadata> metadataList = new ArrayList<>();
+            
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(skillsDir)) {
+                for (Path entry : stream) {
+                    String name = entry.getFileName().toString();
+                    // 排除清单项、排除隐藏文件、且必须是目录
+                    if (!manifest.contains(name) && !name.startsWith(".") && Files.isDirectory(entry)) {
+                        metadataList.add(parseSkillMd(entry));
+                    }
+                }
+            }
+            return metadataList;
+        });
+    }
+
+    /**
+     * 1.6 注册技能至清单
+     */
+    public String registerSkill(String agentId, String skillName) throws IOException {
+        log.info("Registering skill [{}] to manifest for agent: {}", skillName, agentId);
+        if (skillName == null || skillName.trim().isEmpty()) {
+            throw new RuntimeException("Skill name cannot be empty.");
+        }
+        Path skillsDir = getAgentRoot(agentId).resolve("skills");
+        Path skillPath = skillsDir.resolve(skillName).normalize();
+        
+        storageService.validateScope(skillPath, skillsDir);
+        if (!Files.exists(skillPath) || !Files.isDirectory(skillPath)) {
+            throw new IOException("Physical skill directory not found: " + skillName);
+        }
+
+        storageService.writeLockedVoid(agentId, () -> {
+            Set<String> manifest = getManifest(skillsDir);
+            if (manifest.add(skillName)) {
+                saveManifest(skillsDir, manifest);
+            }
+        });
+        return "Successfully registered skill [" + skillName + "] to manifest.";
     }
 
     private void zipDirectory(Path folder, String parentFolder, ZipOutputStream zos) throws IOException {
@@ -279,7 +365,7 @@ public class SandboxService {
     }
 
     /**
-     * 2.2 列出目录清单 (极致性能优化版)
+     * 2.2 列出目录清单 (极致性能优化版 + 身份清单过滤)
      */
     public List<String> listFiles(String agentId, String logicalPrefix) throws IOException {
         log.info("Listing files for agent: {}, prefix: {}", agentId, logicalPrefix);
@@ -290,10 +376,28 @@ public class SandboxService {
 
         return storageService.readLocked(agentId, () -> {
             long start = System.currentTimeMillis();
-            // 使用 try-with-resources 确保 Stream 及时关闭，释放文件句柄
-            try (Stream<Path> stream = Files.walk(physicalRoot, 5)) { // 限制深度为 5 层，防止恶意超深目录导致 OOM
-                List<String> results = stream.parallel() // 并行处理路径转换
+            
+            // 如果是查看技能目录，需要结合清单进行过滤
+            final Set<String> manifest = logicalPrefix.startsWith("skills") ? getManifest(agentRoot.resolve("skills")) : null;
+
+            try (Stream<Path> stream = Files.walk(physicalRoot, 5)) {
+                List<String> results = stream.parallel()
                         .filter(Files::isRegularFile)
+                        .filter(file -> {
+                            // 过滤隐藏文件 (如 .manifest)
+                            if (file.getFileName().toString().startsWith(".")) return false;
+                            
+                            // 如果是技能目录，检查其所属的一级目录是否在清单中
+                            if (manifest != null) {
+                                Path relativeToSkills = agentRoot.resolve("skills").relativize(file);
+                                if (relativeToSkills.getNameCount() > 0) {
+                                    String topLevelDir = relativeToSkills.getName(0).toString();
+                                    return manifest.contains(topLevelDir);
+                                }
+                                return false;
+                            }
+                            return true;
+                        })
                         .map(file -> agentRoot.relativize(file).toString().replace('\\', '/'))
                         .collect(Collectors.toList());
                 log.info("Listed {} files in {}ms", results.size(), System.currentTimeMillis() - start);
@@ -307,7 +411,7 @@ public class SandboxService {
      */
     public FileContentResult getContent(String agentId, String logicalPath, Integer offset, Integer limit) throws IOException {
         log.info("Fetching content for agent: {}, path: {}, offset: {}, limit: {}", agentId, logicalPath, offset, limit);
-        
+        validateHiddenFileAccess(logicalPath);
         Path physicalPath = resolveLogicalPath(agentId, logicalPath);
         if (!Files.exists(physicalPath)) throw new IOException("Path not found: " + logicalPath);
 
@@ -333,6 +437,7 @@ public class SandboxService {
      * 2.4 写入/新建文件
      */
     public String write(String agentId, WriteRequest request) throws IOException {
+        validateHiddenFileAccess(request.getFilePath());
         validateSkillMdPlacement(request.getFilePath());
         Path physicalPath = resolveLogicalPath(agentId, request.getFilePath());
         storageService.writeLockedVoid(agentId, () -> {
@@ -346,6 +451,7 @@ public class SandboxService {
      * 2.5 精确编辑/替换
      */
     public String edit(String agentId, EditRequest request) throws IOException {
+        validateHiddenFileAccess(request.getFilePath());
         validateSkillMdPlacement(request.getFilePath());
         Path physicalPath = resolveLogicalPath(agentId, request.getFilePath());
         if (!Files.exists(physicalPath)) throw new IOException("Path not found: " + request.getFilePath());
@@ -416,6 +522,7 @@ public class SandboxService {
      */
     public String deleteFile(String agentId, String logicalPath) throws IOException {
         log.info("Deleting file for agent: {}, path: {}", agentId, logicalPath);
+        validateHiddenFileAccess(logicalPath);
         Path physicalPath = resolveLogicalPath(agentId, logicalPath);
 
         storageService.writeLockedVoid(agentId, () -> {
@@ -429,6 +536,47 @@ public class SandboxService {
     }
 
     // --- 内部辅助方法 ---
+
+    /**
+     * 维护技能身份清单 (.manifest)
+     */
+    private Set<String> getManifest(Path skillsDir) throws IOException {
+        Path manifestPath = skillsDir.resolve(".manifest");
+        if (!Files.exists(manifestPath)) return new LinkedHashSet<>();
+        try {
+            return new LinkedHashSet<>(Files.readAllLines(manifestPath, StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            log.warn("Failed to read .manifest at {}, returning empty set.", manifestPath);
+            return new LinkedHashSet<>();
+        }
+    }
+
+    private void saveManifest(Path skillsDir, Set<String> manifest) throws IOException {
+        Path manifestPath = skillsDir.resolve(".manifest");
+        Files.write(manifestPath, manifest, StandardCharsets.UTF_8, 
+            StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+    }
+
+    private void addToManifest(Path skillsDir, Collection<String> skillNames) throws IOException {
+        Set<String> manifest = getManifest(skillsDir);
+        manifest.addAll(skillNames);
+        saveManifest(skillsDir, manifest);
+    }
+
+    private void removeFromManifest(Path skillsDir, String skillName) throws IOException {
+        Set<String> manifest = getManifest(skillsDir);
+        if (manifest.remove(skillName)) {
+            saveManifest(skillsDir, manifest);
+        }
+    }
+
+    private void validateHiddenFileAccess(String logicalPath) {
+        if (logicalPath == null) return;
+        String fileName = Paths.get(logicalPath).getFileName().toString();
+        if (fileName.startsWith(".")) {
+            throw new RuntimeException("Security Error: Access to hidden system files (starting with '.') is forbidden.");
+        }
+    }
 
     private void scanAndValidateSkills(ZipInputStream zis, Set<String> skills, Set<String> skillsWithMd) throws IOException {
         ZipEntry entry;

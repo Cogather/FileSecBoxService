@@ -27,8 +27,11 @@
 
 ### 1.2 查询技能清单
 *   **功能**: 返回该应用下所有已安装技能的名称及描述。
+*   **来源标识**: 
+    *   `u_` 前缀：代表该技能是通过 `upload` 接口手动上传的。
+    *   无前缀：代表该技能是通过脚本或 `write` 接口自动生成的。
 *   **冗余层压缩**: 
-    *   如果系统检测到技能目录下存在冗余的单一子目录（如 `skills/A/A/SKILL.md`），系统会自动将其“剥离”，将内容提升到一级目录根部。
+    *   如果系统检测到技能目录下存在冗余的单一子目录（如 `skills/u_A/u_A/SKILL.md`），系统会自动将其“剥离”，将内容提升到一级目录根部。
     *   **触发场景**：该逻辑在 `list` 接口调用及 `execute` 接口（涉及技能路径时）执行后自动触发。
 *   **URL**: `GET /v1/skills/{agentId}/list`
 *   **示例**:
@@ -75,6 +78,32 @@
     curl -o weather_backup.zip "$BASE_URL/v1/skills/agent001/download?name=weather"
     ```
 *   **响应**: 返回 ZIP 二进制流。
+
+### 1.5 获取非清单技能列表
+*   **功能**: 获取 `skills/` 目录下存在物理文件夹、但未在 `.manifest` 清单中备案的技能。
+*   **URL**: `GET /v1/skills/{agentId}/unlisted`
+*   **示例**:
+    ```bash
+    curl -X GET "$BASE_URL/v1/skills/agent001/unlisted"
+    ```
+*   **输出**: 返回包含 `name` 和 `description` 的数组。
+
+### 1.6 注册技能至清单
+*   **功能**: 将已存在的物理技能目录手动添加至 `.manifest` 清单中。
+*   **URL**: `POST /v1/skills/{agentId}/register`
+*   **参数**: 
+    *   `name` (Query): 技能文件夹名。
+*   **示例**:
+    ```bash
+    curl -X POST "$BASE_URL/v1/skills/agent001/register?name=auto_task"
+    ```
+*   **输出**:
+    ```json
+    {
+      "status": "success",
+      "data": "Successfully registered skill [auto_task] to manifest."
+    }
+    ```
 
 ---
 

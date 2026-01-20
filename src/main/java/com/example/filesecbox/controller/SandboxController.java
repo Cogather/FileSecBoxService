@@ -73,6 +73,30 @@ public class SandboxController {
         }
     }
 
+    @GetMapping("/skills/{agentId}/unlisted")
+    public ResponseEntity<ApiResponse<?>> getUnlistedSkillList(@PathVariable String agentId) {
+        log.info("API CALL: getUnlistedSkillList, agentId: {}", agentId);
+        try {
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.getUnlistedSkillList(agentId)));
+        } catch (Exception e) {
+            log.error("API ERROR: getUnlistedSkillList", e);
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    @PostMapping("/skills/{agentId}/register")
+    public ResponseEntity<ApiResponse<?>> registerSkill(
+            @PathVariable String agentId,
+            @RequestParam("name") String name) {
+        log.info("API CALL: registerSkill, agentId: {}, skillName: {}", agentId, name);
+        try {
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.registerSkill(agentId, name)));
+        } catch (Exception e) {
+            log.error("API ERROR: registerSkill", e);
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
+        }
+    }
+
     // --- 2. 文件与执行管理 ---
 
     @PostMapping("/files/{agentId}/upload")
