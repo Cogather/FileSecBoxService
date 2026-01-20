@@ -110,6 +110,17 @@ public class SandboxController {
         }
     }
 
+    @PostMapping("/skills/{agentId}/install-creator")
+    public ResponseEntity<ApiResponse<?>> installCreator(@PathVariable String agentId) {
+        log.info("API CALL: installCreator, agentId: {}", agentId);
+        try {
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.installCreator(agentId)));
+        } catch (Exception e) {
+            log.error("API ERROR: installCreator", e);
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
+        }
+    }
+
     // --- 2. 文件与执行管理 ---
 
     @PostMapping("/files/{agentId}/upload")
