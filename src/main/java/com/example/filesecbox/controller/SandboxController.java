@@ -17,54 +17,85 @@ public class SandboxController {
 
     // --- 1. 技能管理 ---
 
-    @PostMapping("/skills/{agentId}/upload")
+    @PostMapping("/skills/{userId}/{agentId}/upload")
     public ResponseEntity<ApiResponse<?>> uploadSkill(
+            @PathVariable String userId,
             @PathVariable String agentId,
             @RequestParam("file") MultipartFile file) {
-        log.info("API CALL: uploadSkill, agentId: {}, filename: {}", agentId, file.getOriginalFilename());
+        log.info("API CALL: uploadSkill, userId: {}, agentId: {}, filename: {}", userId, agentId, file.getOriginalFilename());
         try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.uploadSkillReport(agentId, file)));
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.uploadSkillReport(userId, agentId, file)));
         } catch (Exception e) {
             log.error("API ERROR: uploadSkill", e);
-            // 业务校验失败返回 200 OK，但状态为 error
             return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
-    @GetMapping("/skills/{agentId}/list")
-    public ResponseEntity<ApiResponse<?>> getSkillList(@PathVariable String agentId) {
-        log.info("API CALL: getSkillList, agentId: {}", agentId);
+    @GetMapping("/skills/{userId}/{agentId}/list")
+    public ResponseEntity<ApiResponse<?>> getSkillList(
+            @PathVariable String userId,
+            @PathVariable String agentId) {
+        log.info("API CALL: getSkillList, userId: {}, agentId: {}", userId, agentId);
         try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.getSkillList(agentId)));
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.getSkillList(userId, agentId, false)));
         } catch (Exception e) {
             log.error("API ERROR: getSkillList", e);
             return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
-    @DeleteMapping("/skills/{agentId}/delete")
-    public ResponseEntity<ApiResponse<?>> deleteSkill(
+    @GetMapping("/skills/{userId}/{agentId}/list-with-status")
+    public ResponseEntity<ApiResponse<?>> getSkillListWithStatus(
+            @PathVariable String userId,
+            @PathVariable String agentId) {
+        log.info("API CALL: getSkillListWithStatus, userId: {}, agentId: {}", userId, agentId);
+        try {
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.getSkillList(userId, agentId, true)));
+        } catch (Exception e) {
+            log.error("API ERROR: getSkillListWithStatus", e);
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    @PostMapping("/skills/{userId}/{agentId}/baseline-sync")
+    public ResponseEntity<ApiResponse<?>> baselineSync(
+            @PathVariable String userId,
             @PathVariable String agentId,
             @RequestParam("name") String name) {
-        log.info("API CALL: deleteSkill, agentId: {}, skillName: {}", agentId, name);
+        log.info("API CALL: baselineSync, userId: {}, agentId: {}, skillName: {}", userId, agentId, name);
         try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.deleteSkill(agentId, name)));
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.baselineSync(userId, agentId, name)));
+        } catch (Exception e) {
+            log.error("API ERROR: baselineSync", e);
+            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
+        }
+    }
+
+    @DeleteMapping("/skills/{userId}/{agentId}/delete")
+    public ResponseEntity<ApiResponse<?>> deleteSkill(
+            @PathVariable String userId,
+            @PathVariable String agentId,
+            @RequestParam("name") String name) {
+        log.info("API CALL: deleteSkill, userId: {}, agentId: {}, skillName: {}", userId, agentId, name);
+        try {
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.deleteSkill(userId, agentId, name)));
         } catch (Exception e) {
             log.error("API ERROR: deleteSkill", e);
             return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
-    @GetMapping("/skills/{agentId}/download")
+    @GetMapping("/skills/{userId}/{agentId}/download")
     public void downloadSkill(
+            @PathVariable String userId,
             @PathVariable String agentId,
             @RequestParam("name") String name,
             javax.servlet.http.HttpServletResponse response) {
-        log.info("API CALL: downloadSkill, agentId: {}, skillName: {}", agentId, name);
+        log.info("API CALL: downloadSkill, userId: {}, agentId: {}, skillName: {}", userId, agentId, name);
         try {
             response.setContentType("application/zip");
             response.setHeader("Content-Disposition", "attachment; filename=" + name + ".zip");
-            sandboxService.downloadSkill(agentId, name, response.getOutputStream());
+            sandboxService.downloadSkill(userId, agentId, name, response.getOutputStream());
         } catch (Exception e) {
             log.error("API ERROR: downloadSkill", e);
             try {
@@ -73,35 +104,13 @@ public class SandboxController {
         }
     }
 
-    @GetMapping("/skills/{agentId}/unlisted")
-    public ResponseEntity<ApiResponse<?>> getUnlistedSkillList(@PathVariable String agentId) {
-        log.info("API CALL: getUnlistedSkillList, agentId: {}", agentId);
+    @PostMapping("/skills/{userId}/{agentId}/install-creator")
+    public ResponseEntity<ApiResponse<?>> installCreator(
+            @PathVariable String userId,
+            @PathVariable String agentId) {
+        log.info("API CALL: installCreator, userId: {}, agentId: {}", userId, agentId);
         try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.getUnlistedSkillList(agentId)));
-        } catch (Exception e) {
-            log.error("API ERROR: getUnlistedSkillList", e);
-            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
-        }
-    }
-
-    @PostMapping("/skills/{agentId}/register")
-    public ResponseEntity<ApiResponse<?>> registerSkill(
-            @PathVariable String agentId,
-            @RequestParam("name") String name) {
-        log.info("API CALL: registerSkill, agentId: {}, skillName: {}", agentId, name);
-        try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.registerSkill(agentId, name)));
-        } catch (Exception e) {
-            log.error("API ERROR: registerSkill", e);
-            return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
-        }
-    }
-
-    @PostMapping("/skills/{agentId}/install-creator")
-    public ResponseEntity<ApiResponse<?>> installCreator(@PathVariable String agentId) {
-        log.info("API CALL: installCreator, agentId: {}", agentId);
-        try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.installCreator(agentId)));
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.installCreator(userId, agentId)));
         } catch (Exception e) {
             log.error("API ERROR: installCreator", e);
             return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
@@ -110,77 +119,83 @@ public class SandboxController {
 
     // --- 2. 文件与执行管理 ---
 
-    @PostMapping("/files/{agentId}/upload")
+    @PostMapping("/files/{userId}/{agentId}/upload")
     public ResponseEntity<ApiResponse<?>> uploadFile(
+            @PathVariable String userId,
             @PathVariable String agentId,
             @RequestParam("file") MultipartFile file) {
-        log.info("API CALL: uploadFile, agentId: {}, filename: {}", agentId, file.getOriginalFilename());
+        log.info("API CALL: uploadFile, userId: {}, agentId: {}, filename: {}", userId, agentId, file.getOriginalFilename());
         try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.uploadFile(agentId, file)));
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.uploadFile(userId, agentId, file)));
         } catch (Exception e) {
             log.error("API ERROR: uploadFile", e);
             return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
-    @GetMapping("/{agentId}/files")
+    @GetMapping("/{userId}/{agentId}/files")
     public ResponseEntity<ApiResponse<?>> listFiles(
+            @PathVariable String userId,
             @PathVariable String agentId,
             @RequestParam("path") String path) {
-        log.info("API CALL: listFiles, agentId: {}, path: {}", agentId, path);
+        log.info("API CALL: listFiles, userId: {}, agentId: {}, path: {}", userId, agentId, path);
         try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.listFiles(agentId, path)));
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.listFiles(userId, agentId, path)));
         } catch (Exception e) {
             log.error("API ERROR: listFiles", e);
             return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
-    @GetMapping("/{agentId}/content")
+    @GetMapping("/{userId}/{agentId}/content")
     public ResponseEntity<ApiResponse<?>> getContent(
+            @PathVariable String userId,
             @PathVariable String agentId,
             @RequestParam("path") String path,
             @RequestParam(value = "offset", required = false) Integer offset,
             @RequestParam(value = "limit", required = false) Integer limit) {
-        log.info("API CALL: getContent, agentId: {}, path: {}, offset: {}, limit: {}", agentId, path, offset, limit);
+        log.info("API CALL: getContent, userId: {}, agentId: {}, path: {}, offset: {}, limit: {}", userId, agentId, path, offset, limit);
         try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.getContent(agentId, path, offset, limit)));
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.getContent(userId, agentId, path, offset, limit)));
         } catch (Exception e) {
             log.error("API ERROR: getContent", e);
             return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
-    @PostMapping("/{agentId}/write")
+    @PostMapping("/{userId}/{agentId}/write")
     public ResponseEntity<ApiResponse<?>> write(
+            @PathVariable String userId,
             @PathVariable String agentId,
             @RequestBody WriteRequest request) {
         try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.write(agentId, request)));
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.write(userId, agentId, request)));
         } catch (Exception e) {
             log.error("API ERROR: write", e);
             return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
-    @PostMapping("/{agentId}/edit")
+    @PostMapping("/{userId}/{agentId}/edit")
     public ResponseEntity<ApiResponse<?>> edit(
+            @PathVariable String userId,
             @PathVariable String agentId,
             @RequestBody EditRequest request) {
         try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.edit(agentId, request)));
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.edit(userId, agentId, request)));
         } catch (Exception e) {
             log.error("API ERROR: edit", e);
             return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
         }
     }
 
-    @PostMapping("/{agentId}/execute")
+    @PostMapping("/{userId}/{agentId}/execute")
     public ResponseEntity<ApiResponse<?>> execute(
+            @PathVariable String userId,
             @PathVariable String agentId,
             @RequestBody CommandRequest request) {
         try {
-            ExecutionResult result = sandboxService.execute(agentId, request);
+            ExecutionResult result = sandboxService.execute(userId, agentId, request);
             return ResponseEntity.ok(ApiResponse.success(result));
         } catch (Exception e) {
             log.error("API ERROR: execute", e);
@@ -188,13 +203,14 @@ public class SandboxController {
         }
     }
 
-    @DeleteMapping("/{agentId}/delete")
+    @DeleteMapping("/{userId}/{agentId}/delete")
     public ResponseEntity<ApiResponse<?>> deleteFile(
+            @PathVariable String userId,
             @PathVariable String agentId,
             @RequestParam("path") String path) {
-        log.info("API CALL: deleteFile, agentId: {}, path: {}", agentId, path);
+        log.info("API CALL: deleteFile, userId: {}, agentId: {}, path: {}", userId, agentId, path);
         try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.deleteFile(agentId, path)));
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.deleteFile(userId, agentId, path)));
         } catch (Exception e) {
             log.error("API ERROR: deleteFile", e);
             return ResponseEntity.ok(ApiResponse.error(e.getMessage()));

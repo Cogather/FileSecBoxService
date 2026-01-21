@@ -1,87 +1,75 @@
 # FileSecBoxService 设计文档
 
 ## 1. 整体架构
-FileSecBoxService 是一个基于应用（Agent）维度隔离的安全沙箱服务。系统通过逻辑路径前缀（`skills/` 和 `files/`）实现业务功能分流，并在 Root 权限环境下通过严格的路径归一化、指令白名单及环境清理手段保障执行安全。
+FileSecBoxService 是一个基于应用（Agent）维度隔离的安全沙箱服务。为了支持“基线技能”与“个人调测工作区”的分离，系统引入了多租户（User）隔离机制。应用管理员通过上传维护基线，而普通用户在独立的临时工作区中进行同步、调测与修改。
 
 ---
 
 ## 2. 存储设计
 
 ### 2.1 物理目录布局
-所有应用数据均存储在统一的产品根目录下，实现应用间的物理隔离。系统在启动时会根据运行操作系统自动加载 `application.properties` 中对应的路径：
+所有数据均存储在统一的产品根目录下（`${app.product.root}`），通过多级目录实现基线与用户工作区的隔离。
 
-*   **Windows 环境**：使用 `app.product.root.win` 配置（默认 `D:/webIde/product`）。
-*   **Linux/Docker 环境**：使用 `app.product.root.linux` 配置（默认 `/webIde/product`）。
+| 区域 | 物理存储路径 | 说明 |
+| :--- | :--- | :--- |
+| **基线区 (Baseline)** | `${app.product.root}/{agentId}/baseline/` | 存放应用的官方/原始技能及文件。任何上传操作均默认写入此目录。 |
+| **租户区 (Workspaces)** | `${app.product.root}/{agentId}/workspaces/{userId}/` | **全员隔离工作区**。无论何种身份的用户，所有查询、执行、修改等操作均在此临时目录下生效。 |
+| **元数据 (Meta)** | `${app.product.root}/{agentId}/workspaces/{userId}/.meta/` | 记录每个技能的同步时间戳及状态，用于与基线进行比对。 |
+| **全局工具 (Tools)** | `${app.product.root}/skill-creator/` | 存放全局统一的 Skill-Creator 工具包，不随用户隔离。 |
 
-| 业务模块 | 逻辑路径前缀 | 物理存储路径 | 存放内容枚举 |
-| :--- | :--- | :--- | :--- |
-| **技能模块** | `skills/` | `${app.product.root}/{agentId}/skills/` | 技能元数据（SKILL.md）、业务 Python 脚本、技能私有配置。 |
-| **通用文件模块** | `files/` | `${app.product.root}/{agentId}/files/` | 统一的沙箱文件处理代码、公共环境配置、工具类脚本。 |
+### 2.2 工作区同步逻辑 (On-demand Sync)
+*   **触发机制**：当用户首次发起请求（或工作区被清理后再次访问）时，系统自动检查租户区是否存在。
+*   **同步动作**：若不存在，系统会将 `baseline/` 目录下的内容全量拷贝至 `workspaces/{userId}/`。
+*   **初始标记**：同步完成后，在 `.meta/` 下记录当前同步的基线版本或时间戳。
 
-### 2.2 路径校验准则
-*   **前缀强制性**：所有 I/O 接口接收的路径参数（`path` 或 `file_path`）必须且只能以 `skills/` 或 `files/` 作为起始字符串。
-*   **归一化校验**：系统在操作前必须对路径进行 `normalize` 处理，防止通过 `../` 进行路径穿越。
-*   **锚定校验**：物理路径通过 `productRoot.resolve(agentId).resolve(logicalPath)` 计算得到。系统必须校验最终物理路径是否位于 `/webIde/product/{agentId}/` 范围内。
-*   **SKILL.md 写入限制**：
-    *   在 `skills/` 目录下写入名为 `SKILL.md` 的文件时，路径必须严格遵循 `skills/{skill_name}/SKILL.md` 格式。
-    *   禁止在技能子目录下或 `skills/` 根目录下直接创建 `SKILL.md`。
-
----
-
-## 3. 核心功能设计
-
-### 3.1 文件管理逻辑
-*   **全量写入 (Write)**：直接在目标物理路径创建或覆盖文件。系统需拦截非法的 `SKILL.md` 路径。
-*   **分页读取 (Content)**：支持通过 `offset`（起始行号，从 1 开始）和 `limit`（读取行数）参数进行行级分页读取，减少内存负载。
-*   **精确编辑 (Edit)**：
-    *   **匹配机制**：系统读取文件后，寻找 `old_string` 的位置。
-    *   **冲突校验**：通过 `expected_replacements` 参数校验匹配到的次数。若实际匹配次数与预期不符，直接返回错误，不执行替换。
-    *   **原子性**：替换操作在内存完成后一次性写回文件。
-*   **安全删除 (Delete)**：
-    *   **技能删除**：递归删除整个技能目录。
-    *   **文件删除**：支持删除单个文件。所有删除操作必须通过路径归一化校验，严禁操作非 `skills/` 或 `files/` 目录。
-
-### 3.2 技能生命周期
-*   **来源区分 (Source Differentiation)**：
-    *   **手动上传 (`u_`)**：通过 `upload` 接口上传的技能，物理目录名强制增加 `u_` 前缀。
-    *   **自动/其他场景**：通过脚本 (`execute`) 或 `write` 创建的技能，保持原名（无前缀）。
-    *   **智能路由**：系统内部自动处理逻辑路径（如 `skills/A`）到物理路径（优先匹配 `skills/u_A`，其次匹配 `skills/A`）的转换，保持接口对外的简洁性。
-*   **上传 (Upload)**：接收 ZIP 压缩包，解压至该应用的技能物理目录。支持 `UTF-8` 和 `GBK` 双编码兼容处理。
-    *   **注入前缀**：解压时自动为技能根目录注入 `u_` 前缀。
-    *   **合法性校验**：每个技能必须在其根目录下包含 `SKILL.md`。
-*   **远程拉取 (Download-URL)**：支持通过 HTTP/HTTPS URL 远程下载 ZIP 技能包并自动解压安装，流程与手动上传完全对齐（包含身份清单注册）。
-*   **加载与冗余压缩 (Load & Unwrapping)**：
-    *   **冗余层级压缩**：在 `list` 接口或 `execute` 接口执行后，系统会扫描 `skills/` 下的所有一级目录。
-    *   **触发机制**：若发现一级目录（如 `skills/A/`）下仅包含一个子目录（如 `A/B/`）且无其他文件，系统会自动将 `B/` 下的内容提升至 `A/` 下并删除空目录 `B/`。
-    *   **递归压缩**：该逻辑支持递归处理，可有效解决 `skills/A/A/` 这种因脚本拼接错误或解压多层目录导致的冗余结构。
-    *   **目的**：确保技能结构紧凑，保障 `SKILL.md` 处于一级目录根部，从而使技能能被正常识别和列出。
-*   **查询 (List)**：仅返回在压缩打平后，在 `.manifest` 清单中且在一级目录下拥有 `SKILL.md` 的官方技能。
-*   **查询非官方技能 (Unlisted)**：扫描物理目录并排除清单项，允许用户发现脚本自动创建的潜在技能。
-*   **注册 (Register)**：允许将现有的物理技能目录手动添加至 `.manifest` 清单，完成“转正”。
-*   **导出 (Download)**：支持将整个技能目录重新打包为 ZIP 格式下载，便于技能的迁移和备份。系统在打包时会持有读锁，确保数据的完整性。
-*   **解析**：自动扫描并解析 `SKILL.md`，提取 `name` 和 `description` 字段。
-
-### 3.3 安全执行引擎 (Execute)
-*   **工作目录**：必须锚定在逻辑路径对应的物理目录下。
-*   **Shell 包装**：系统自动通过 `bash -c` (Linux) 或 `cmd /c` (Windows) 包装指令，原生支持 `>`, `>>`, `|`, `&&` 等 Shell 操作符。
-*   **指令白名单**：严格限制仅允许执行以下指令作为首个指令：`python`, `python3`, `bash`, `sh`, `cmd`, `ls`, `cat`, `echo`, `grep`, `sed`, `mkdir`, `touch`, `cp`, `mv`, `rm`, `tee`, `find`, `chmod`, `xargs`, `curl`。
-*   **SKILL.md 深度防御策略**：
-    *   **事前拦截**：若命令行中出现 `SKILL.md` 字样，系统会强制检查其路径。如果不是 `skills/{name}/SKILL.md` 格式（例如试图在子目录或根目录下操作），则拒绝执行并返回：“Security Error: 'SKILL.md' is a system reserved file. You can only create/edit it at the root of a skill (e.g., skills/my_skill/SKILL.md).”
-*   **环境净化**：
-    *   **Linux**：清理所有非安全环境变量，强制设置 `PATH=/usr/local/bin:/usr/bin:/bin`。
-    *   **Windows**：识别盘符，统一路径分隔符为 `/`，适配系统字符编码。
-*   **超时控制**：强制设定 5 分钟（300 秒）执行超时。
+### 2.3 路径校验与重定向
+*   **路径屏蔽**：API 接收逻辑路径（如 `skills/A/main.py`），底层自动解析为物理工作区路径。
+*   **Skill-Creator 特殊处理**：如果逻辑路径涉及 `skill-creator`，系统强制重定向到全局工具目录，**屏蔽**掉用户目录下的同名干扰，确保工具版本统一且不占用用户存储。
+*   **安全锚定**：物理路径必须锚定在对应的 `workspaces/{userId}/` 范围内，严禁跨用户或跨应用访问。
 
 ---
 
-## 4. 并发与可靠性
-*   **锁粒度**：采用 `ReentrantReadWriteLock` 实现按 `agentId` 维度的线程锁。
-*   **读写分离**：文件读取接口使用读锁，写入和修改接口使用写锁，确保在高并发下文件不损坏。
+## 3. 技能管理与基线化
+
+### 3.1 技能状态识别
+系统通过比对用户工作区与基线区的元数据，为每个技能定义以下状态：
+*   **`UNCHANGED` (已同步)**：用户技能与基线一致（根据 `mtime` 和 `.meta` 记录比对）。
+*   **`MODIFIED` (已修改)**：用户在工作区修改了技能，尚未同步至基线。
+*   **`NEW` (新增)**：用户在工作区创建了基线中不存在的技能。
+*   **`OUT_OF_SYNC` (基线已更新)**：基线技能有了新版本，用户当前持有的是旧版本。
+
+### 3.2 技能维度的“基线化” (Baselining)
+*   **操作定义**：允许应用管理员将某个处于 `MODIFIED` 或 `NEW` 状态的技能从其个人工作区推送到应用基线。
+*   **原子性覆盖**：操作仅针对特定技能文件夹，将 `workspaces/{userId}/skills/{skillName}` 的内容递归覆盖至 `baseline/skills/{skillName}`。
+*   **全局同步感应**：基线更新后，其他用户的该技能状态会自动变为 `OUT_OF_SYNC`。
+
+### 3.3 技能周期管理
+*   **上传 (Upload)**：默认上传至基线目录。
+*   **查询 (List)**：返回当前用户工作区下的技能列表。系统会自动解析 `SKILL.md` 提取元数据。
+*   **冗余层级压缩**：在列表显示前自动打平 `skills/A/A/` 等异常结构。
 
 ---
 
-## 5. 技术栈枚举
-*   **JDK**: 1.8
-*   **Framework**: Spring Boot 2.3.12.RELEASE
-*   **Build Tool**: Maven 3.6
-*   **OS Support**: Linux (Production), Windows (Validation)
+## 4. 执行引擎与安全
+
+### 4.1 指令执行上下文
+*   **工作目录**：固定为用户的 `workspaces/{userId}/`。
+*   **Shell 包装与白名单**：保持原有的 `bash -c` 包装及严格的指令白名单。
+*   **SKILL.md 保护**：严禁在技能根目录以外的位置操作 `SKILL.md`。
+
+### 4.2 用户目录清理 (Cleanup)
+*   **策略**：闲置存活制 (TTL)。
+*   **执行**：定时任务（每小时）扫描 `workspaces/`。若某个 `userId` 目录下的文件最后访问时间超过 **24小时**，则自动删除该用户目录以释放空间。
+
+---
+
+## 5. 并发锁管理
+*   **锁粒度**：维持 `agentId` 级别的 `ReentrantReadWriteLock`。虽然增加了 `userId`，但为保证基线同步的一致性，按应用维度加锁是最稳健的方案。
+
+---
+
+## 6. 技术栈
+*   **JDK 8 版本**: 适配 Spring Boot 2.3.12.RELEASE, 使用 `javax.servlet`。
+*   **JDK 21 版本**: 适配 Spring Boot 3.x, 使用 `jakarta.servlet`。
+*   **存储**: 本地文件系统。
+*   **并发控制**: 基于 `ReentrantReadWriteLock` 的应用级锁。

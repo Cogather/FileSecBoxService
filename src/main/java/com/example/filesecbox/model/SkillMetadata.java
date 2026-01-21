@@ -4,14 +4,12 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * 技能元数据对象
- */
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
 public class SkillMetadata {
     private String name;
     private String description;
+    private String status; // UNCHANGED, MODIFIED, NEW, OUT_OF_SYNC
+    private String lastSyncTime;
 }
-
