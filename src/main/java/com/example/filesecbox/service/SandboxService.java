@@ -58,13 +58,9 @@ public class SandboxService {
         Files.createDirectories(productRoot);
         log.info("Sandbox Service initialized with product root: {}", productRoot);
 
-        // 下载 Skill-Creator
         downloadGlobalSkillCreator();
     }
 
-    /**
-     * 下载全局 Skill-Creator
-     */
     private void downloadGlobalSkillCreator() {
         if (skillCreatorUrl == null || skillCreatorUrl.trim().isEmpty()) {
             log.warn("Skill Creator URL is not configured. Skipping download.");
@@ -117,9 +113,6 @@ public class SandboxService {
         return workspaceRoot;
     }
 
-    /**
-     * 从基线同步到工作区 (On-demand Sync)
-     */
     private void syncWorkspaceFromBaseline(String userId, String agentId) {
         Path baselineRoot = getBaselineRoot(agentId);
         Path workspaceRoot = productRoot.resolve(agentId).resolve(WORKSPACES_DIR).resolve(userId).normalize();
@@ -128,11 +121,9 @@ public class SandboxService {
             log.info("Syncing workspace for user: {} agent: {}", userId, agentId);
             Files.createDirectories(workspaceRoot);
             if (Files.exists(baselineRoot)) {
-                // JDK 8 适配：FileSystemUtils.copyRecursively 在 Spring 5 以前可能需要 File 参数
                 FileSystemUtils.copyRecursively(baselineRoot.toFile(), workspaceRoot.toFile());
             }
             
-            // 初始化元数据
             Path metaDir = workspaceRoot.resolve(META_DIR);
             Files.createDirectories(metaDir);
             updateWorkspaceMeta(workspaceRoot);
@@ -161,15 +152,11 @@ public class SandboxService {
         }
     }
 
-    /**
-     * 校验并转换逻辑路径为物理路径
-     */
     private Path resolveLogicalPath(String userId, String agentId, String logicalPath) {
         if (logicalPath == null) {
             throw new RuntimeException("Security Error: Path cannot be null.");
         }
         
-        // 特殊处理 skill-creator
         if (logicalPath.startsWith("skills/" + SKILL_CREATOR_DIR)) {
             Path creatorRoot = productRoot.resolve(SKILL_CREATOR_DIR);
             String subPath = logicalPath.substring(("skills/" + SKILL_CREATOR_DIR).length());
@@ -191,9 +178,6 @@ public class SandboxService {
         return physicalPath;
     }
 
-    /**
-     * 1.1 上传技能 (上传至基线)
-     */
     public String uploadSkillReport(String userId, String agentId, MultipartFile file) throws IOException {
         log.info("Starting skill upload to baseline for agent: {}, by user: {}", agentId, userId);
         Path baselineSkillsDir = getBaselineRoot(agentId).resolve("skills");
@@ -203,7 +187,6 @@ public class SandboxService {
         Set<String> skillsWithMd = new HashSet<>();
 
         storageService.writeLockedVoid(agentId, () -> {
-            // 校验与解压到基线
             try (ZipInputStream zis = new ZipInputStream(new java.io.ByteArrayInputStream(data), StandardCharsets.UTF_8)) {
                 scanAndValidateSkills(zis, affectedSkills, skillsWithMd);
             }
@@ -224,9 +207,6 @@ public class SandboxService {
         return "Baseline updated successfully. Skills: " + affectedSkills;
     }
 
-    /**
-     * 1.2 获取技能列表 (可选带状态比对)
-     */
     public List<SkillMetadata> getSkillList(String userId, String agentId, boolean includeStatus) throws IOException {
         Path workspaceRoot = getWorkspaceRoot(userId, agentId);
         Path wsSkillsDir = workspaceRoot.resolve("skills");
@@ -249,7 +229,6 @@ public class SandboxService {
             List<SkillMetadata> metadataList = new ArrayList<>();
             Set<String> processedSkills = new HashSet<>();
 
-            // 1. 遍历工作区技能
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(wsSkillsDir)) {
                 for (Path skillEntry : stream) {
                     if (Files.isDirectory(skillEntry) && Files.exists(skillEntry.resolve("SKILL.md"))) {
@@ -278,7 +257,6 @@ public class SandboxService {
                 }
             }
 
-            // 2. 如果需要状态，补齐基线中存在但工作区已删除的技能 (DELETED)
             if (includeStatus && Files.exists(blSkillsDir)) {
                 try (DirectoryStream<Path> stream = Files.newDirectoryStream(blSkillsDir)) {
                     for (Path blEntry : stream) {
@@ -302,9 +280,6 @@ public class SandboxService {
                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
     }
 
-    /**
-     * 技能基线化 (单技能镜像同步)
-     */
     public String baselineSync(String userId, String agentId, String skillName) throws IOException {
         Path workspaceRoot = getWorkspaceRoot(userId, agentId);
         Path workspaceSkill = workspaceRoot.resolve("skills").resolve(skillName);
@@ -313,32 +288,20 @@ public class SandboxService {
 
         storageService.writeLockedVoid(agentId, () -> {
             if (Files.exists(workspaceSkill)) {
-                // 1. 如果工作区存在：覆盖基线
                 storageService.deleteRecursively(baselineSkill);
                 Files.createDirectories(baselineSkill.getParent());
                 FileSystemUtils.copyRecursively(workspaceSkill.toFile(), baselineSkill.toFile());
-                
                 log.info("Baseline updated for skill: {}", skillName);
             } else if (Files.exists(baselineSkill)) {
-                // 2. 如果工作区不存在且基线存在：删除基线
                 storageService.deleteRecursively(baselineSkill);
                 log.info("Baseline deleted for skill: {}", skillName);
             } else {
                 throw new IOException("Skill not found in both workspace and baseline: " + skillName);
             }
-            
-            // 更新当前用户的元数据
             updateWorkspaceMeta(workspaceRoot);
         });
 
         return "Baseline synchronized for skill: " + skillName;
-    }
-
-    private void removeFromManifest(Path skillsDir, String skillName) throws IOException {
-        Set<String> manifest = getManifest(skillsDir);
-        if (manifest.remove(skillName)) {
-            saveManifest(skillsDir, manifest);
-        }
     }
 
     public String deleteSkill(String userId, String agentId, String skillName) throws IOException {
@@ -365,37 +328,6 @@ public class SandboxService {
             }
             return null;
         });
-    }
-
-    public List<SkillMetadata> getUnlistedSkillList(String userId, String agentId) throws IOException {
-        Path wsSkillsDir = getWorkspaceRoot(userId, agentId).resolve("skills");
-        return storageService.readLocked(agentId, () -> {
-            Set<String> manifest = getManifest(wsSkillsDir);
-            List<SkillMetadata> metadataList = new ArrayList<>();
-            try (DirectoryStream<Path> stream = Files.newDirectoryStream(wsSkillsDir)) {
-                for (Path entry : stream) {
-                    String name = entry.getFileName().toString();
-                    if (!manifest.contains(name) && !name.startsWith(".") && Files.isDirectory(entry)) {
-                        metadataList.add(parseSkillMd(entry));
-                    }
-                }
-            }
-            return metadataList;
-        });
-    }
-
-    public String registerSkill(String userId, String agentId, String skillName) throws IOException {
-        Path wsSkillsDir = getWorkspaceRoot(userId, agentId).resolve("skills");
-        Path skillPath = wsSkillsDir.resolve(skillName).normalize();
-        storageService.validateScope(skillPath, wsSkillsDir);
-        
-        storageService.writeLockedVoid(agentId, () -> {
-            Set<String> manifest = getManifest(wsSkillsDir);
-            if (manifest.add(skillName)) {
-                saveManifest(wsSkillsDir, manifest);
-            }
-        });
-        return "Registered skill in workspace: " + skillName;
     }
 
     public String installCreator(String userId, String agentId) throws IOException {
@@ -468,15 +400,12 @@ public class SandboxService {
     public ExecutionResult execute(String userId, String agentId, CommandRequest request) throws Exception {
         Path workspaceRoot = getWorkspaceRoot(userId, agentId);
         String command = request.getCommand().trim();
-        
-        // 执行重定向逻辑：如果命令涉及 skill-creator，将其逻辑路径替换为全局物理路径
         String creatorLogical = "skills/" + SKILL_CREATOR_DIR;
         if (command.contains(creatorLogical)) {
             String creatorPhysical = productRoot.resolve(SKILL_CREATOR_DIR).toAbsolutePath().toString().replace("\\", "/");
             command = command.replace(creatorLogical, creatorPhysical);
             log.info("Command redirected for skill-creator: {}", command);
         }
-        
         return skillExecutor.executeInDir(workspaceRoot, command);
     }
 
@@ -489,8 +418,6 @@ public class SandboxService {
         });
         return "Deleted from workspace: " + logicalPath;
     }
-
-    // --- 辅助方法 ---
 
     private void validateSkillMdPlacement(String logicalPath) {
         if (logicalPath == null) return;
@@ -534,7 +461,6 @@ public class SandboxService {
 
     private void zipDirectory(Path folder, String parentFolder, ZipOutputStream zos) throws IOException {
         try (Stream<Path> stream = Files.walk(folder)) {
-            // JDK 8 适配：需要处理显式的异常或迭代器
             Iterator<Path> it = stream.iterator();
             while (it.hasNext()) {
                 Path path = it.next();
@@ -565,85 +491,25 @@ public class SandboxService {
         return meta;
     }
 
-    private void zipDirectory(Path folder, String parentFolder, ZipOutputStream zos) throws IOException {
-        try (Stream<Path> stream = Files.walk(folder)) {
-            // JDK 8 适配：需要处理显式的异常或迭代器
-            Iterator<Path> it = stream.iterator();
-            while (it.hasNext()) {
-                Path path = it.next();
-                if (Files.isDirectory(path)) continue;
-                String zipEntryName = parentFolder + "/" + folder.relativize(path).toString().replace('\\', '/');
-                zos.putNextEntry(new ZipEntry(zipEntryName));
-                Files.copy(path, zos);
-                zos.closeEntry();
-            }
-        }
-    }
-
-    private SkillMetadata parseSkillMd(Path skillPath) {
-        Path mdPath = skillPath.resolve("SKILL.md");
-        SkillMetadata meta = new SkillMetadata();
-        meta.setName(skillPath.getFileName().toString());
-        meta.setDescription("No description.");
-        if (Files.exists(mdPath)) {
-            try (BufferedReader reader = Files.newBufferedReader(mdPath, StandardCharsets.UTF_8)) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    String trimmed = line.trim().toLowerCase();
-                    if (trimmed.startsWith("name:")) meta.setName(line.substring(line.indexOf(":") + 1).trim());
-                    if (trimmed.startsWith("description:")) meta.setDescription(line.substring(line.indexOf(":") + 1).trim());
-                }
-            } catch (IOException ignored) {}
-        }
-        return meta;
-    }
-
-    private Set<String> getManifest(Path skillsDir) throws IOException {
-        Path manifestPath = skillsDir.resolve(".manifest");
-        if (!Files.exists(manifestPath)) return new LinkedHashSet<>();
-        return new LinkedHashSet<>(Files.readAllLines(manifestPath, StandardCharsets.UTF_8));
-    }
-
-    private void saveManifest(Path skillsDir, Set<String> manifest) throws IOException {
-        Files.write(skillsDir.resolve(".manifest"), manifest, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-    }
-
-    private void addToManifest(Path skillsDir, Collection<String> skillNames) throws IOException {
-        Set<String> manifest = getManifest(skillsDir);
-        manifest.addAll(skillNames);
-        saveManifest(skillsDir, manifest);
-    }
-
-    /**
-     * 定时清理任务：每小时执行一次，清理 12 小时未活动的工作区
-     */
     @Scheduled(cron = "0 0 * * * ?")
     public void cleanupWorkspaces() {
         log.info("Starting scheduled workspace cleanup...");
-        try {
-            DirectoryStream<Path> agentStream = Files.newDirectoryStream(productRoot);
-            try {
-                for (Path agentDir : agentStream) {
-                    Path workspacesDir = agentDir.resolve(WORKSPACES_DIR);
-                    if (Files.exists(workspacesDir)) {
-                        DirectoryStream<Path> userStream = Files.newDirectoryStream(workspacesDir);
-                        try {
-                            for (Path userDir : userStream) {
-                                if (Files.isDirectory(userDir)) {
-                                    long lastAccess = Files.getLastModifiedTime(userDir).toMillis();
-                                    if (System.currentTimeMillis() - lastAccess > 24 * 3600 * 1000) {
-                                        log.info("Cleaning up idle workspace: {}", userDir);
-                                        storageService.deleteRecursively(userDir);
-                                    }
+        try (DirectoryStream<Path> agentStream = Files.newDirectoryStream(productRoot)) {
+            for (Path agentDir : agentStream) {
+                Path workspacesDir = agentDir.resolve(WORKSPACES_DIR);
+                if (Files.exists(workspacesDir)) {
+                    try (DirectoryStream<Path> userStream = Files.newDirectoryStream(workspacesDir)) {
+                        for (Path userDir : userStream) {
+                            if (Files.isDirectory(userDir)) {
+                                long lastAccess = Files.getLastModifiedTime(userDir).toMillis();
+                                if (System.currentTimeMillis() - lastAccess > 24 * 3600 * 1000) {
+                                    log.info("Cleaning up idle workspace: {}", userDir);
+                                    storageService.deleteRecursively(userDir);
                                 }
                             }
-                        } finally {
-                            userStream.close();
                         }
                     }
                 }
-            } finally {
-                agentStream.close();
             }
         } catch (IOException e) {
             log.error("Error during workspace cleanup", e);

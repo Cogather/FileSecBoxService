@@ -1,11 +1,10 @@
 package com.example.filesecbox.model;
 
-import lombok.Data;
-
-/**
- * 统一命令执行入参
- */
-@Data
 public class CommandRequest {
     private String command;
+
+    public CommandRequest() {}
+
+    public String getCommand() { return command; }
+    public void setCommand(String command) { this.command = command; }
 }

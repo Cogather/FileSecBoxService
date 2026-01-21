@@ -1,14 +1,20 @@
 package com.example.filesecbox.model;
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import java.util.List;
 
-@Data
-@AllArgsConstructor
-@NoArgsConstructor
 public class FileContentResult {
-    private String content;      // 字符串格式
-    private List<String> lines;  // 列表格式
+    private String content;
+    private List<String> lines;
+
+    public FileContentResult() {}
+
+    public FileContentResult(String content, List<String> lines) {
+        this.content = content;
+        this.lines = lines;
+    }
+
+    public String getContent() { return content; }
+    public void setContent(String content) { this.content = content; }
+    public List<String> getLines() { return lines; }
+    public void setLines(List<String> lines) { this.lines = lines; }
 }
