@@ -67,7 +67,19 @@
     curl -X POST "$BASE_URL/v1/skills/admin_user/agent001/baseline-sync?name=weather"
     ```
 
-### 1.3 上传技能 (上传至基线)
+### 1.4 上传技能 (上传至基线)
+*   **功能**: 上传一个包含多个技能目录的 Zip 包，系统会自动解析、验证并更新至全局基线 (`baseline/skills`)。
+*   **URL**: `POST /v1/skills/{userId}/{agentId}/upload`
+*   **参数**:
+    *   `file` (Multipart): 包含技能目录的 Zip 文件。
+*   **规则**:
+    *   每个技能目录内必须包含 `SKILL.md`。
+    *   上传后会覆盖基线中同名的技能。
+    *   此操作通常由管理员执行，用于分发应用级的基础技能。
+*   **示例**:
+    ```bash
+    curl -X POST "http://localhost:8003/v1/skills/admin/agent001/upload" -F "file=@myskills.zip"
+    ```
 
 ---
 
