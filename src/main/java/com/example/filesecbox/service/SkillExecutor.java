@@ -186,21 +186,29 @@ public class SkillExecutor {
         
         // 如果参数中包含产品根路径，则必须被限制在当前的工作目录下，或者是全局工具目录下
         if (normArg.contains(normRoot)) {
-            try {
-                Path targetPath = Paths.get(arg).toAbsolutePath().normalize();
-                Path creatorPath = rootPath.resolve(SKILL_CREATOR_DIR).normalize();
+            // 提取指令中的所有潜在路径片段进行校验
+            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"([^\"]+)\"|([^\\s><|&]+)").matcher(arg);
+            while (matcher.find()) {
+                String potentialPath = matcher.group(1) != null ? matcher.group(1) : matcher.group(2);
+                String normPotential = potentialPath.replace('\\', '/').toLowerCase();
                 
-                boolean inWorkspace = targetPath.startsWith(workingDir.toAbsolutePath().normalize());
-                boolean inGlobalTools = targetPath.startsWith(creatorPath);
-                
-                if (!inWorkspace && !inGlobalTools) {
-                    throw new RuntimeException("Security Error: Accessing path outside workspace scope: " + arg);
+                // 只有当这个片段确实指向 productRoot 相关的物理路径时才深入校验
+                if (normPotential.contains(normRoot)) {
+                    try {
+                        Path targetPath = Paths.get(potentialPath).toAbsolutePath().normalize();
+                        Path creatorPath = rootPath.resolve(SKILL_CREATOR_DIR).normalize();
+                        
+                        boolean inWorkspace = targetPath.startsWith(workingDir.toAbsolutePath().normalize());
+                        boolean inGlobalTools = targetPath.startsWith(creatorPath);
+                        
+                        if (!inWorkspace && !inGlobalTools) {
+                            throw new RuntimeException("Security Error: Accessing path outside workspace scope: " + potentialPath);
+                        }
+                    } catch (Exception e) {
+                        if (e instanceof RuntimeException) throw (RuntimeException) e;
+                        // 忽略无法解析为合法路径的普通参数片段
+                    }
                 }
-            } catch (Exception e) {
-                // 如果路径解析失败（例如包含非法字符），且它包含了 productRoot，
-                // 为了安全起见，如果不确定路径的合法性且它涉及敏感根目录，我们选择拦截
-                if (e instanceof RuntimeException) throw (RuntimeException) e;
-                log.warn("Path validation failed for: {}", arg, e);
             }
         }
     }
