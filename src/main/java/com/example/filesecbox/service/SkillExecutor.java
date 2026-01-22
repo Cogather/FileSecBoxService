@@ -67,6 +67,8 @@ public class SkillExecutor {
                 // 如果片段包含路径分隔符或文件名后缀
                 if (potentialPath.contains("/") || potentialPath.contains("\\") || potentialPath.contains(".")) {
                     String normalized = potentialPath.replace('\\', '/').toLowerCase();
+                    String productRoot = isWin ? productRootWin : productRootLinux;
+                    String normGlobalCreator = Paths.get(productRoot).resolve(SKILL_CREATOR_DIR).toAbsolutePath().toString().replace("\\", "/").toLowerCase();
                     
                     // --- 新增：SKILL.md 深度拦截逻辑 ---
                     if (normalized.endsWith("/skill.md") || normalized.equals("skill.md")) {
@@ -77,10 +79,24 @@ public class SkillExecutor {
                         }
                     }
 
-                    if (!normalized.startsWith("skills/") && !normalized.startsWith("files/") &&
-                        !normalized.equals("skills") && !normalized.equals("files") &&
-                        !normalized.startsWith("skills/" + SKILL_CREATOR_DIR)) {
+                    boolean isLogicPath = normalized.startsWith("skills/") || normalized.startsWith("files/") ||
+                                        normalized.equals("skills") || normalized.equals("files");
+                    boolean isGlobalCreatorPath = normalized.startsWith(normGlobalCreator);
+
+                    if (!isLogicPath && !isGlobalCreatorPath) {
                         throw new RuntimeException("Security Error: Path '" + potentialPath + "' is out of operable scope. Must start with 'skills/' or 'files/'.");
+                    }
+
+                    // --- 新增：针对 skill-creator 的写保护 ---
+                    if (isGlobalCreatorPath) {
+                        Set<String> writeCmds = new HashSet<>(Arrays.asList("mkdir", "touch", "cp", "mv", "rm", "tee", "chmod"));
+                        if (writeCmds.contains(firstCmd)) {
+                            throw new RuntimeException("Security Error: Modification of 'skill-creator' is strictly forbidden. Command '" + firstCmd + "' blocked.");
+                        }
+                        // 检查重定向符号
+                        if (commandLine.contains(">") || commandLine.contains(">>")) {
+                            throw new RuntimeException("Security Error: Redirecting output to 'skill-creator' is strictly forbidden.");
+                        }
                     }
 
                     // --- 新增：自动创建目录逻辑 (增强版) ---
