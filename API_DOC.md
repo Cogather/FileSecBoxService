@@ -81,6 +81,30 @@
     curl -X POST "http://localhost:8003/v1/skills/admin/agent001/upload" -F "file=@myskills.zip"
     ```
 
+### 1.5 删除工作区技能
+*   **功能**: 从当前用户的临时工作空间中物理删除指定技能。
+*   **URL**: `DELETE /v1/skills/{userId}/{agentId}/delete?name={skillName}`
+*   **参数**:
+    *   `userId`: 用户唯一标识
+    *   `agentId`: 应用唯一标识
+    *   `name`: 技能名称 (目录名)
+*   **返回示例**:
+    ```json
+    {
+      "status": "success",
+      "data": "Successfully deleted skill from workspace: my_skill"
+    }
+    ```
+
+### 1.6 下载工作区技能
+*   **功能**: 将用户工作区下的指定技能打包为 ZIP 文件下载。
+*   **URL**: `GET /v1/skills/{userId}/{agentId}/download?name={skillName}`
+*   **参数**:
+    *   `userId`: 用户唯一标识
+    *   `agentId`: 应用唯一标识
+    *   `name`: 技能名称 (目录名)
+*   **响应**: 二进制流 (application/zip)
+
 ---
 
 ## 2. 文件与执行管理 (Sandbox)
