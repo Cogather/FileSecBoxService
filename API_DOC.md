@@ -105,6 +105,7 @@
 ### 2.5 执行指令
 *   **功能**: 在租户隔离的工作区 `${app.product.root}/{agentId}/workspaces/{userId}/` 目录下执行指令。
 *   **URL**: `POST /v1/{userId}/{agentId}/execute`
+*   **Body (JSON)**: `{"command": "..."}`
 *   **说明**: 物理路径对用户透明，用户仅需关注逻辑路径。
 
 ### 2.6 删除文件

@@ -1,5 +1,8 @@
 package com.example.filesecbox.model;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class SkillMetadata {
     private String name;
     private String description;
