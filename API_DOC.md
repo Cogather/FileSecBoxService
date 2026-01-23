@@ -31,16 +31,23 @@
 ### 1.2 查询技能列表 (带状态比对)
 *   **功能**: 返回当前用户工作区下的技能列表，并计算相对于基线的状态。
 *   **URL**: `GET /v1/skills/{userId}/{agentId}/list-with-status`
+*   **参数**:
+    *   `role` (Query, 可选): 如果传 `manager`，则会触发基线到工作区的实时增量同步。
+*   **同步逻辑 (仅当 `role=manager` 时)**:
+    1.  **新增同步**: 基线中存在但工作区不存在的技能，自动同步至工作区。
+    2.  **更新同步**: 仅当基线的更新时间 (`mtime`) **晚于** 用户工作空间的最后修改时间时，才自动覆盖同步至工作区；否则保持工作空间的修改状态，不执行覆盖。
+    3.  **删除同步**: 工作区存在但基线中已不存在的技能，自动从工作区物理删除。
 *   **状态说明**:
     *   `UNCHANGED`: 与基线一致
-    *   `MODIFIED`: 用户已修改
-    *   `NEW`: 用户新增
+    *   `MODIFIED`: 用户工作区已修改
+    *   `LOCAL_ONLY`: 只在用户工作区存在，基线中不存在
     *   `OUT_OF_SYNC`: 基线有更新
-    *   `DELETED`: 基线存在，但用户在工作区已将其删除。
-*   **操作逻辑**: 对于 `DELETED` 状态的技能，用户依然可以通过 `baseline-sync` 接口将其从基线中彻底删除。
+*   **同步机制**:
+    *   **Manager 自动同步**: 当 `role=manager` 时，系统会自动执行增量同步（新增、更新、删除）。
+    *   **普通用户手动同步**: 非管理员用户若发现 `OUT_OF_SYNC` 状态，可通过 `baseline-sync` 接口（或前端触发相应逻辑）将基线最新内容同步至个人工作区。
 *   **示例**:
     ```bash
-    curl -X GET "$BASE_URL/v1/skills/user123/agent001/list-with-status"
+    curl -X GET "$BASE_URL/v1/skills/user123/agent001/list-with-status?role=manager"
     ```
 *   **输出**:
     ```json
@@ -57,14 +64,19 @@
     }
     ```
 
-### 1.3 技能基线化 (单技能)
-*   **功能**: 将指定用户工作区中的技能更新到应用的基线中（仅限应用管理员使用）。
+### 1.3 技能同步 (双向)
+*   **功能**: 
+    *   **工作区 -> 基线 (基线化)**: 将指定用户工作区中的技能更新到应用的基线中（仅限管理员使用）。
+    *   **基线 -> 工作区 (手动同步)**: 将基线中的最新技能内容覆盖同步到当前用户的工作区。如果基线中不存在该技能但工作区存在（`LOCAL_ONLY`），则会从工作区删除该技能。
 *   **URL**: `POST /v1/skills/{userId}/{agentId}/baseline-sync`
 *   **参数**:
-    *   `name` (Query): 需要基线化的技能文件夹名。
-*   **示例**:
+    *   `name` (Query): 需要同步的技能文件夹名。
+    *   `direction` (Query, 可选): 同步方向。
+        *   `ws2bl` (默认): 工作区同步至基线 (Workspace to Baseline)。
+        *   `bl2ws`: 基线同步至工作区 (Baseline to Workspace)。
+*   **示例 (基线同步至工作区)**:
     ```bash
-    curl -X POST "$BASE_URL/v1/skills/admin_user/agent001/baseline-sync?name=weather"
+    curl -X POST "$BASE_URL/v1/skills/user123/agent001/baseline-sync?name=weather&direction=bl2ws"
     ```
 
 ### 1.4 上传技能 (上传至基线)
@@ -81,8 +93,8 @@
     curl -X POST "http://localhost:8003/v1/skills/admin/agent001/upload" -F "file=@myskills.zip"
     ```
 
-### 1.5 删除工作区技能
-*   **功能**: 从当前用户的临时工作空间中物理删除指定技能。
+### 1.5 删除技能 (操作基线)
+*   **功能**: 从全局基线 (`baseline/skills`) 中物理删除指定技能。
 *   **URL**: `DELETE /v1/skills/{userId}/{agentId}/delete?name={skillName}`
 *   **参数**:
     *   `userId`: 用户唯一标识

@@ -37,7 +37,7 @@ public class SandboxController {
             @PathVariable String agentId) {
         log.info("API CALL: getSkillList, userId: {}, agentId: {}", userId, agentId);
         try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.getSkillList(userId, agentId, false)));
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.getSkillList(userId, agentId, false, null)));
         } catch (Exception e) {
             log.error("API ERROR: getSkillList", e);
             return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
@@ -47,10 +47,11 @@ public class SandboxController {
     @GetMapping("/skills/{userId}/{agentId}/list-with-status")
     public ResponseEntity<ApiResponse<?>> getSkillListWithStatus(
             @PathVariable String userId,
-            @PathVariable String agentId) {
-        log.info("API CALL: getSkillListWithStatus, userId: {}, agentId: {}", userId, agentId);
+            @PathVariable String agentId,
+            @RequestParam(value = "role", required = false) String role) {
+        log.info("API CALL: getSkillListWithStatus, userId: {}, agentId: {}, role: {}", userId, agentId, role);
         try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.getSkillList(userId, agentId, true)));
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.getSkillList(userId, agentId, true, role)));
         } catch (Exception e) {
             log.error("API ERROR: getSkillListWithStatus", e);
             return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
@@ -61,10 +62,11 @@ public class SandboxController {
     public ResponseEntity<ApiResponse<?>> baselineSync(
             @PathVariable String userId,
             @PathVariable String agentId,
-            @RequestParam("name") String name) {
-        log.info("API CALL: baselineSync, userId: {}, agentId: {}, skillName: {}", userId, agentId, name);
+            @RequestParam("name") String name,
+            @RequestParam(value = "direction", defaultValue = "ws2bl") String direction) {
+        log.info("API CALL: baselineSync, userId: {}, agentId: {}, skillName: {}, direction: {}", userId, agentId, name, direction);
         try {
-            return ResponseEntity.ok(ApiResponse.success(sandboxService.baselineSync(userId, agentId, name)));
+            return ResponseEntity.ok(ApiResponse.success(sandboxService.baselineSync(userId, agentId, name, direction)));
         } catch (Exception e) {
             log.error("API ERROR: baselineSync", e);
             return ResponseEntity.ok(ApiResponse.error(e.getMessage()));
